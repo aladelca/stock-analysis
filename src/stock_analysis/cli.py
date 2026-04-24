@@ -7,7 +7,7 @@ import typer
 from rich import print
 
 from stock_analysis.backtest.runner import BacktestConfig
-from stock_analysis.config import load_config
+from stock_analysis.config import OptimizerConfig, load_config
 from stock_analysis.env import load_local_env
 from stock_analysis.logging import configure_logging
 from stock_analysis.ml.experiments import run_experiment_from_config
@@ -53,6 +53,11 @@ EXPERIMENTS_OPTION = typer.Option(
     "--experiments",
     help="Comma-separated Phase 2 experiment ids.",
 )
+OPTIMIZER_MAX_WEIGHT_OPTION = typer.Option(
+    None,
+    "--optimizer-max-weight",
+    help="Override the Phase 2 optimizer max-weight cap.",
+)
 
 
 @app.command("run-one-shot")
@@ -84,10 +89,16 @@ def run_phase2_command(
     max_rebalances: int | None = MAX_REBALANCES_OPTION,
     max_assets: int | None = MAX_ASSETS_OPTION,
     experiments: str = EXPERIMENTS_OPTION,
+    optimizer_max_weight: float | None = OPTIMIZER_MAX_WEIGHT_OPTION,
     no_sweeps: bool = typer.Option(False, "--no-sweeps"),
     no_nested_cv: bool = typer.Option(False, "--no-nested-cv"),
 ) -> None:
     configure_logging()
+    optimizer = (
+        OptimizerConfig(max_weight=optimizer_max_weight)
+        if optimizer_max_weight is not None
+        else OptimizerConfig()
+    )
     summary = run_phase2(
         Phase2Config(
             input_run_root=input_run_root,
@@ -95,6 +106,7 @@ def run_phase2_command(
             force=force,
             experiments=tuple(item.strip() for item in experiments.split(",") if item.strip()),
             max_assets=max_assets,
+            optimizer=optimizer,
             backtest=BacktestConfig(max_rebalances=max_rebalances),
             run_sweeps=not no_sweeps,
             lightgbm_nested_cv=not no_nested_cv,

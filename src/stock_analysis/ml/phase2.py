@@ -364,28 +364,57 @@ def run_phase2(config: Phase2Config) -> pd.DataFrame:
         raise ValueError(msg)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    results: list[dict[str, Any]] = []
+    results_by_id: dict[str, dict[str, Any]] = {}
     backtests: dict[str, pd.DataFrame] = {}
+    deferred_benchmarks: list[str] = []
 
     for experiment_id in config.experiments:
+        if experiment_id in {"E1", "E2"}:
+            deferred_benchmarks.append(experiment_id)
+            continue
         result = _run_single_experiment(experiment_id, artifacts, feature_columns, config)
-        backtests[experiment_id] = result.pop("_backtest", pd.DataFrame())
-        results.append(result)
+        _record_phase2_result(result, results_by_id, backtests)
         _write_experiment_report(result, config.output_dir / f"{experiment_id.lower()}.md")
 
+    reference_dates = _reference_rebalance_dates(backtests)
+    for experiment_id in deferred_benchmarks:
+        result = _run_single_experiment(
+            experiment_id,
+            artifacts,
+            feature_columns,
+            config,
+            reference_dates=reference_dates,
+        )
+        _record_phase2_result(result, results_by_id, backtests)
+        _write_experiment_report(result, config.output_dir / f"{experiment_id.lower()}.md")
+
+    results = [
+        results_by_id[experiment_id]
+        for experiment_id in config.experiments
+        if experiment_id in results_by_id
+    ]
     summary = pd.DataFrame(results)
     sweeps = (
         _run_winner_sweeps(summary, artifacts, feature_columns, config)
         if config.run_sweeps
         else pd.DataFrame()
     )
-    _write_phase2_report(summary, sweeps, backtests, config.output_dir / "phase2-report.md")
+    _write_phase2_report(
+        summary,
+        sweeps,
+        backtests,
+        config.output_dir / "phase2-report.md",
+        config=config,
+        artifacts=artifacts,
+    )
     _write_phase2_report(
         summary,
         sweeps,
         backtests,
         config.output_dir / "phase2-detailed-summary.md",
         detailed=True,
+        config=config,
+        artifacts=artifacts,
     )
     return summary
 
@@ -395,13 +424,41 @@ def _run_single_experiment(
     artifacts: dict[str, pd.DataFrame],
     feature_columns: tuple[str, ...],
     config: Phase2Config,
+    *,
+    reference_dates: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     spec = _experiment_spec(experiment_id, artifacts, feature_columns, config)
     if spec.benchmark_kind == "spy":
-        return _run_spy_benchmark(spec, artifacts, config)
+        return _run_spy_benchmark(spec, artifacts, config, reference_dates=reference_dates)
     if spec.benchmark_kind == "equal_weight":
-        return _run_equal_weight_benchmark(spec, artifacts, config)
+        return _run_equal_weight_benchmark(
+            spec,
+            artifacts,
+            config,
+            reference_dates=reference_dates,
+        )
     return _run_model_experiment(spec, artifacts, config)
+
+
+def _record_phase2_result(
+    result: dict[str, Any],
+    results_by_id: dict[str, dict[str, Any]],
+    backtests: dict[str, pd.DataFrame],
+) -> None:
+    experiment_id = str(result["experiment_id"])
+    backtests[experiment_id] = result.pop("_backtest", pd.DataFrame())
+    results_by_id[experiment_id] = result
+
+
+def _reference_rebalance_dates(backtests: dict[str, pd.DataFrame]) -> list[str]:
+    for experiment_id in ("E0", "E3", "E4", "E5", "E6", "E7", "E8"):
+        frame = backtests.get(experiment_id, pd.DataFrame())
+        if frame.empty or "rebalance_date" not in frame.columns:
+            continue
+        dates = frame["rebalance_date"].dropna().astype(str).drop_duplicates().tolist()
+        if dates:
+            return dates
+    return []
 
 
 def _experiment_spec(
@@ -556,9 +613,17 @@ def _run_spy_benchmark(
     spec: ExperimentSpec,
     artifacts: dict[str, pd.DataFrame],
     config: Phase2Config,
+    *,
+    reference_dates: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     benchmark = _benchmark_for_horizon(artifacts["benchmark"], config.horizon_days)
-    benchmark = _sample_rebalance_rows(benchmark, "date", config.backtest.rebalance_step_days)
+    benchmark = _sample_rebalance_rows(
+        benchmark,
+        "date",
+        config.backtest.rebalance_step_days,
+        config.backtest.max_rebalances,
+        reference_dates=reference_dates,
+    )
     backtest = benchmark.rename(
         columns={"date": "rebalance_date", "spy_return": "portfolio_net_return"}
     )
@@ -588,6 +653,8 @@ def _run_equal_weight_benchmark(
     spec: ExperimentSpec,
     artifacts: dict[str, pd.DataFrame],
     config: Phase2Config,
+    *,
+    reference_dates: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     target_col = f"fwd_return_{config.horizon_days}d"
     backtest = (
@@ -601,6 +668,8 @@ def _run_equal_weight_benchmark(
         backtest,
         "rebalance_date",
         config.backtest.rebalance_step_days,
+        config.backtest.max_rebalances,
+        reference_dates=reference_dates,
     )
     backtest["portfolio_gross_return"] = backtest["portfolio_net_return"]
     backtest["turnover"] = np.nan
@@ -892,7 +961,10 @@ def _summary_row(
         "sharpe": portfolio.get("sharpe"),
         "annualized_return": portfolio.get("annualized_return"),
         "max_drawdown": portfolio.get("max_drawdown"),
+        "active_return": benchmark.get("active_return"),
+        "tracking_error": benchmark.get("tracking_error"),
         "information_ratio": benchmark.get("information_ratio"),
+        "ir_observations": benchmark.get("observations"),
         "metrics": metrics,
     }
 
@@ -960,13 +1032,26 @@ def _sample_rebalance_rows(
     frame: pd.DataFrame,
     date_column: str,
     rebalance_step_days: int,
+    max_rebalances: int | None = None,
+    *,
+    reference_dates: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     if frame.empty:
         return frame.copy()
-    step = max(rebalance_step_days, 1)
     sorted_frame = frame.copy()
-    sorted_frame[date_column] = pd.to_datetime(sorted_frame[date_column])
-    sampled = sorted_frame.sort_values(date_column).iloc[::step].copy()
+    sorted_frame[date_column] = pd.to_datetime(sorted_frame[date_column]).dt.normalize()
+    if reference_dates:
+        aligned_dates = pd.DatetimeIndex(pd.to_datetime(pd.Series(reference_dates))).normalize()
+        sampled = sorted_frame.loc[sorted_frame[date_column].isin(aligned_dates)].copy()
+    else:
+        step = max(rebalance_step_days, 1)
+        sampled = sorted_frame.sort_values(date_column).iloc[::step].copy()
+        if max_rebalances is not None and max_rebalances <= 0:
+            sampled = sampled.iloc[0:0].copy()
+        elif max_rebalances is not None and len(sampled) > max_rebalances:
+            sample_positions = np.linspace(0, len(sampled) - 1, max_rebalances).round()
+            sampled = sampled.iloc[np.unique(sample_positions.astype(int))].copy()
+    sampled = sampled.sort_values(date_column)
     sampled[date_column] = sampled[date_column].dt.date.astype(str)
     return sampled.reset_index(drop=True)
 
@@ -1102,6 +1187,8 @@ def _write_phase2_report(
     path: Path,
     *,
     detailed: bool = False,
+    config: Phase2Config | None = None,
+    artifacts: dict[str, pd.DataFrame] | None = None,
 ) -> None:
     display = summary.drop(columns=["metrics"], errors="ignore")
     gating = _gating_decision(summary, backtests)
@@ -1120,12 +1207,29 @@ def _write_phase2_report(
                     "Phase 2 compares the current heuristic forecast against market, "
                     "equal-weight, linear, LightGBM, ranking, classification, and blended ML "
                     "models. All model experiments feed forecast scores into the same frozen "
-                    "long-only optimizer so model differences are attributable to `mu` quality."
+                    "long-only optimizer so model differences are attributable to `mu` quality. "
+                    "The continuation objective for this report is SPY-relative: find an ML "
+                    "portfolio with higher Sharpe than SPY and positive information ratio."
                 ),
                 (
                     "When `max_assets` is configured, experiments run on the most liquid assets "
                     "by latest `dollar_volume_21d`; this keeps optimizer runtimes manageable and "
                     "is explicitly part of the experiment scope."
+                ),
+                "",
+                *_run_configuration_section(config, artifacts, backtests),
+                *_model_result_section(summary, backtests),
+                "## SPY-Relative IR Calculation",
+                "",
+                (
+                    "Information ratio is calculated only on exact rebalance-date matches between "
+                    "portfolio period returns and SPY forward returns for the same horizon. "
+                    "`active_return = mean(portfolio_return - spy_return) * periods_per_year`, "
+                    "`tracking_error = std(portfolio_return - spy_return) * "
+                    "sqrt(periods_per_year)`, "
+                    "and `IR = active_return / tracking_error`. The results table includes the "
+                    "annualized active return, annualized tracking error, and aligned observation "
+                    "count used in that calculation."
                 ),
                 "",
                 "## Optimization Model",
@@ -1173,6 +1277,161 @@ def _write_phase2_report(
     path.write_text("\n".join(sections), encoding="utf-8")
 
 
+def _run_configuration_section(
+    config: Phase2Config | None,
+    artifacts: dict[str, pd.DataFrame] | None,
+    backtests: dict[str, pd.DataFrame],
+) -> list[str]:
+    if config is None:
+        return []
+
+    rows = ["## Run Configuration", ""]
+    rows.append(f"- Source artifacts: `{config.input_run_root}`.")
+    if artifacts:
+        panel = artifacts.get("panel", pd.DataFrame())
+        labels = artifacts.get("labels", pd.DataFrame())
+        rows.append(f"- Feature panel window: {_date_window(panel, 'date')}.")
+        rows.append(f"- Label panel window: {_date_window(labels, 'date')}.")
+        ticker_count = (
+            int(panel["ticker"].astype(str).nunique())
+            if not panel.empty and "ticker" in panel.columns
+            else 0
+        )
+        universe = (
+            f"top {config.max_assets} assets by latest `{config.liquidity_column}`"
+            if config.max_assets is not None
+            else "all available assets"
+        )
+        rows.append(f"- Experiment universe: {universe}; {ticker_count} tickers in scope.")
+
+    reference_dates = _reference_rebalance_dates(backtests)
+    if reference_dates:
+        rows.append(
+            "- Completed rebalance observations: "
+            f"{len(reference_dates)} dates from {reference_dates[0]} to {reference_dates[-1]}."
+        )
+    requested = (
+        str(config.backtest.max_rebalances)
+        if config.backtest.max_rebalances is not None
+        else "all available"
+    )
+    lightgbm_mode = (
+        "nested inner-CV enabled" if config.lightgbm_nested_cv else "fixed grid, no nested CV"
+    )
+    rows.extend(
+        [
+            (
+                "- Backtest setup: "
+                f"{config.horizon_days}-trading-day target, "
+                f"{config.backtest.rebalance_step_days}-business-day rebalance step, "
+                f"{requested} requested rebalance samples, "
+                f"{config.backtest.cost_bps:g} bps transaction cost."
+            ),
+            (
+                "- Optimizer setup: "
+                f"max_weight={config.optimizer.max_weight:g}, "
+                f"risk_aversion={config.optimizer.risk_aversion:g}, "
+                f"lambda_turnover={config.optimizer.lambda_turnover:g}."
+            ),
+            (f"- LightGBM execution: {lightgbm_mode} with random_seed={config.random_seed}."),
+            "",
+        ]
+    )
+    return rows
+
+
+def _model_result_section(
+    summary: pd.DataFrame,
+    backtests: dict[str, pd.DataFrame],
+) -> list[str]:
+    if summary.empty:
+        return []
+
+    best_ic = _best_completed_row(summary, ["E3", "E4", "E5", "E6", "E7", "E8"], "pearson_ic")
+    best_rank_ic = _best_completed_row(
+        summary,
+        ["E3", "E4", "E5", "E6", "E7", "E8"],
+        "rank_ic",
+    )
+    best_portfolio = _best_completed_row(
+        summary,
+        ["E3", "E4", "E5", "E6", "E7", "E8"],
+        "sharpe",
+    )
+
+    rows = ["## Experimentation Outcome", ""]
+    if best_ic is not None:
+        rows.append(
+            "- Best ML model by Pearson IC: "
+            f"{best_ic['experiment_id']} ({best_ic['model_name']}), "
+            f"IC {_format_table_value(best_ic['pearson_ic'])}."
+        )
+    if best_rank_ic is not None:
+        rows.append(
+            "- Best ML model by rank IC: "
+            f"{best_rank_ic['experiment_id']} ({best_rank_ic['model_name']}), "
+            f"rank IC {_format_table_value(best_rank_ic['rank_ic'])}."
+        )
+    if best_portfolio is not None:
+        turnover = _mean_turnover(backtests.get(str(best_portfolio["experiment_id"])))
+        rows.append(
+            "- Best optimized ML portfolio: "
+            f"{best_portfolio['experiment_id']} ({best_portfolio['model_name']}), "
+            f"Sharpe {_format_table_value(best_portfolio['sharpe'])}, "
+            f"annualized return {_format_table_value(best_portfolio['annualized_return'])}, "
+            f"SPY-relative IR {_format_table_value(best_portfolio['information_ratio'])}, "
+            f"annualized active return {_format_table_value(best_portfolio['active_return'])}, "
+            f"mean turnover {_format_table_value(turnover)}."
+        )
+    rows.extend(
+        [
+            (
+                "- Interpretation: predictive IC and optimized portfolio quality can diverge; "
+                "the promotion decision is therefore based on the portfolio backtest versus SPY, "
+                "not on predictive IC alone."
+            ),
+            "",
+        ]
+    )
+    return rows
+
+
+def _best_completed_row(
+    summary: pd.DataFrame,
+    experiment_ids: Sequence[str],
+    metric_column: str,
+) -> pd.Series | None:
+    if metric_column not in summary.columns:
+        return None
+    candidates = summary.loc[
+        (summary["status"] == "completed") & summary["experiment_id"].isin(experiment_ids)
+    ].copy()
+    if candidates.empty:
+        return None
+    candidates["_rank_value"] = pd.to_numeric(candidates[metric_column], errors="coerce")
+    candidates = candidates.dropna(subset=["_rank_value"])
+    if candidates.empty:
+        return None
+    return candidates.sort_values("_rank_value", ascending=False).iloc[0]
+
+
+def _mean_turnover(backtest: pd.DataFrame | None) -> float | None:
+    if backtest is None or backtest.empty or "turnover" not in backtest.columns:
+        return None
+    by_date = backtest.drop_duplicates("rebalance_date")
+    value = pd.to_numeric(by_date["turnover"], errors="coerce").mean()
+    return float(value) if pd.notna(value) else None
+
+
+def _date_window(frame: pd.DataFrame, date_column: str) -> str:
+    if frame.empty or date_column not in frame.columns:
+        return "unavailable"
+    dates = pd.to_datetime(frame[date_column], errors="coerce").dropna()
+    if dates.empty:
+        return "unavailable"
+    return f"{dates.min().date().isoformat()} to {dates.max().date().isoformat()}"
+
+
 def _markdown_table(frame: pd.DataFrame) -> str:
     if frame.empty:
         return "_No rows._"
@@ -1197,33 +1456,38 @@ def _format_table_value(value: object) -> str:
 
 def _gating_decision(summary: pd.DataFrame, backtests: dict[str, pd.DataFrame]) -> str:
     completed = summary.loc[summary["status"] == "completed"].copy()
-    if completed.empty or "E0" not in set(completed["experiment_id"]):
-        return "NO-GO: Phase 2 has not produced a completed heuristic baseline yet."
-    e0 = completed.loc[completed["experiment_id"] == "E0"].iloc[0]
+    if completed.empty or "E1" not in set(completed["experiment_id"]):
+        return "NO-GO: Phase 2 has not produced a completed SPY benchmark yet."
+    spy = completed.loc[completed["experiment_id"] == "E1"].iloc[0]
     contenders = completed.loc[
         completed["experiment_id"].isin(["E3", "E4", "E5", "E6", "E7", "E8"])
     ]
     winners = contenders.loc[
-        (contenders["pearson_ic"].fillna(-np.inf) > (e0["pearson_ic"] or -np.inf))
+        (contenders["sharpe"].fillna(-np.inf) > (spy["sharpe"] or -np.inf))
         & (contenders["information_ratio"].fillna(-np.inf) > 0)
+        & (contenders["active_return"].fillna(-np.inf) > 0)
     ]
     if winners.empty:
         return (
-            "NO-GO: no Phase 2 ML model currently beats E0 on OOS IC and SPY-relative IR. "
-            "Do not start Phase 3."
+            "NO-GO: no Phase 2 ML portfolio currently beats SPY on Sharpe while also "
+            "delivering positive annualized active return and positive SPY-relative IR."
         )
     best = winners.sort_values(["sharpe", "information_ratio"], ascending=False).iloc[0]
     ci = _sharpe_difference_ci(
         backtests.get(str(best["experiment_id"]), pd.DataFrame()),
-        backtests.get("E0", pd.DataFrame()),
+        backtests.get("E1", pd.DataFrame()),
     )
-    ci_text = f" Sharpe-difference 95% CI vs E0: [{ci[0]:.3f}, {ci[1]:.3f}]." if ci else ""
+    ci_text = f" Sharpe-difference 95% CI vs SPY: [{ci[0]:.3f}, {ci[1]:.3f}]." if ci else ""
     if ci and ci[0] <= 0:
         return (
-            f"NO-GO: {best['experiment_id']} beats E0 on IC and has positive IR, but the "
-            f"Sharpe-difference CI includes zero.{ci_text}"
+            f"PROVISIONAL: {best['experiment_id']} beats SPY on Sharpe and has positive IR, "
+            f"but the Sharpe-difference CI includes zero.{ci_text}"
         )
-    return f"GO: {best['experiment_id']} beats E0 on IC and has positive IR vs SPY.{ci_text}"
+    return (
+        f"GO: {best['experiment_id']} beats SPY with Sharpe {best['sharpe']:.3f}, "
+        f"annualized active return {best['active_return']:.3f}, and IR "
+        f"{best['information_ratio']:.3f}.{ci_text}"
+    )
 
 
 def _sharpe_difference_ci(

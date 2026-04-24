@@ -99,5 +99,19 @@ def test_run_phase2_writes_reports_and_tracking_artifacts(tmp_path) -> None:
         "E8",
     }
     assert (tmp_path / "reports" / "phase2-report.md").exists()
+    detailed_report = (tmp_path / "reports" / "phase2-detailed-summary.md").read_text(
+        encoding="utf-8"
+    )
+    assert "SPY-Relative IR Calculation" in detailed_report
+    assert "Experimentation Outcome" in detailed_report
     assert (tmp_path / "reports" / "e0.md").exists()
     assert (tmp_path / "experiments" / "e0" / "backtest.parquet").exists()
+    e0_dates = (
+        pd.read_parquet(tmp_path / "experiments" / "e0" / "backtest.parquet")["rebalance_date"]
+        .drop_duplicates()
+        .tolist()
+    )
+    e1_dates = pd.read_parquet(tmp_path / "experiments" / "e1" / "backtest.parquet")[
+        "rebalance_date"
+    ].tolist()
+    assert e1_dates == e0_dates

@@ -4,7 +4,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stock_analysis.ml.evaluation import EvaluationConfig, evaluate
+from stock_analysis.ml.evaluation import (
+    EvaluationConfig,
+    benchmark_relative_metrics,
+    evaluate,
+)
 
 
 def test_evaluate_reports_reproducible_predictive_metrics() -> None:
@@ -35,3 +39,35 @@ def test_evaluate_reports_reproducible_predictive_metrics() -> None:
     )
     assert metrics["predictive"]["pearson_ic_ci_95"] == repeated["predictive"]["pearson_ic_ci_95"]
     assert "rank_ic" in metrics["predictive"]
+
+
+def test_benchmark_relative_information_ratio_uses_aligned_active_returns() -> None:
+    portfolio = pd.DataFrame(
+        {
+            "date": ["2026-01-01", "2026-01-08", "2026-01-15"],
+            "portfolio_return": [0.03, 0.01, -0.02],
+        }
+    )
+    benchmark = pd.DataFrame(
+        {
+            # Deliberately unordered to prove the function aligns by date, not position.
+            "date": ["2026-01-15", "2026-01-01", "2026-01-08"],
+            "benchmark_return": [0.00, 0.01, 0.00],
+        }
+    )
+
+    metrics = benchmark_relative_metrics(
+        portfolio,
+        benchmark,
+        EvaluationConfig(periods_per_year=52),
+    )
+
+    active = np.array([0.02, 0.01, -0.02])
+    expected_active_return = float(active.mean() * 52)
+    expected_tracking_error = float(active.std(ddof=1) * np.sqrt(52))
+    assert metrics["observations"] == 3
+    assert metrics["active_return"] == pytest.approx(expected_active_return)
+    assert metrics["tracking_error"] == pytest.approx(expected_tracking_error)
+    assert metrics["information_ratio"] == pytest.approx(
+        expected_active_return / expected_tracking_error
+    )

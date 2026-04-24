@@ -103,6 +103,7 @@ def benchmark_relative_metrics(
         on=cfg.date_column,
         how="inner",
     ).dropna(subset=["portfolio_return", benchmark_col])
+    merged = merged.sort_values(cfg.date_column).reset_index(drop=True)
     if len(merged) < 2:
         return {}
 
@@ -112,13 +113,21 @@ def benchmark_relative_metrics(
     beta = float(np.cov(x, y, ddof=1)[0, 1] / variance) if variance > 0 else 0.0
     alpha_period = float(y.mean() - beta * x.mean())
     active = y - x
-    tracking_error = float(np.std(active, ddof=1) * sqrt(cfg.periods_per_year))
-    information_ratio = _safe_divide(float(active.mean() * cfg.periods_per_year), tracking_error)
+    active_return = float(active.mean() * cfg.periods_per_year)
+    tracking_error_period = float(np.std(active, ddof=1))
+    tracking_error = float(tracking_error_period * sqrt(cfg.periods_per_year))
+    information_ratio = _safe_divide(active_return, tracking_error)
     return {
         "alpha": alpha_period * cfg.periods_per_year,
         "beta": beta,
+        "active_return": active_return,
+        "active_return_period": float(active.mean()),
         "information_ratio": information_ratio,
         "tracking_error": tracking_error,
+        "tracking_error_period": tracking_error_period,
+        "portfolio_mean_return_period": float(y.mean()),
+        "benchmark_mean_return_period": float(x.mean()),
+        "observations": float(len(merged)),
     }
 
 
