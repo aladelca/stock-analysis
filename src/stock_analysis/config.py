@@ -68,10 +68,18 @@ class PanelFeatureConfig(BaseModel):
 
 
 class ForecastConfig(BaseModel):
+    engine: Literal["heuristic", "ml"] = "heuristic"
     momentum_window: int = Field(default=252, ge=2)
     volatility_penalty: float = Field(default=0.25, ge=0)
     covariance_lookback_days: int = Field(default=252, ge=2)
     label_horizons: list[int] = Field(default_factory=lambda: [5, 21, 63])
+    ml_model_version: str = "phase2-e8-ridge-lightgbm-blend-v1"
+    ml_horizon_days: int = Field(default=5, ge=1)
+    ml_max_assets: int | None = Field(default=100, ge=1)
+    ml_feature_columns: list[str] = Field(default_factory=list)
+    ml_lightgbm_nested_cv: bool = False
+    ml_lightgbm_inner_folds: int = Field(default=2, ge=1)
+    ml_random_seed: int = 42
 
     @field_validator("label_horizons")
     @classmethod

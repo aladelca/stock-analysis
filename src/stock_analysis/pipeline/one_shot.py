@@ -13,6 +13,7 @@ from stock_analysis.domain.models import PipelineResult
 from stock_analysis.features.panel import compute_asset_feature_panel
 from stock_analysis.features.price_features import compute_asset_daily_features
 from stock_analysis.forecasting.baseline import build_optimizer_inputs
+from stock_analysis.forecasting.ml_forecast import build_ml_optimizer_inputs
 from stock_analysis.ingestion.prices import PriceDownload, PriceProvider, YFinancePriceProvider
 from stock_analysis.ingestion.raw_store import write_json, write_text
 from stock_analysis.ingestion.universe import fetch_sp500_html, parse_sp500_constituents
@@ -144,7 +145,15 @@ def run_one_shot(
     features = compute_asset_daily_features(asset_daily_prices, constituents, config.features)
     write_silver_table(features, "asset_daily_features", paths)
 
-    optimizer_input, covariance = build_optimizer_inputs(features, returns, config.forecast)
+    if config.forecast.engine == "ml":
+        optimizer_input, covariance = build_ml_optimizer_inputs(
+            feature_panel,
+            labels_panel,
+            returns,
+            config.forecast,
+        )
+    else:
+        optimizer_input, covariance = build_optimizer_inputs(features, returns, config.forecast)
     write_parquet(optimizer_input, paths.gold_path("optimizer_input"))
     write_csv(optimizer_input, paths.csv_mirror_path("gold", "optimizer_input"))
     covariance.to_parquet(paths.gold_path("covariance_matrix"))
@@ -226,6 +235,12 @@ def _build_run_metadata(
         "as_of_date": data_as_of_date.isoformat(),
         "data_as_of_date": data_as_of_date.isoformat(),
         "config_hash": config_hash,
+        "forecast_engine": config.forecast.engine,
+        "model_version": (
+            config.forecast.ml_model_version if config.forecast.engine == "ml" else "heuristic"
+        ),
+        "model_family": ("ridge_lightgbm_blend" if config.forecast.engine == "ml" else "heuristic"),
+        "expected_return_is_calibrated": False,
         "universe_count": int(len(constituents)),
         "price_row_count": int(len(daily_prices)),
         "created_at_utc": datetime.now(UTC).isoformat(),

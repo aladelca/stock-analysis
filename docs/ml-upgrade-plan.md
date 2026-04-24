@@ -327,6 +327,14 @@ Only run if Phase 2 produces a clear winner over the heuristic. Otherwise the DL
 - **Monitoring.** Every live run records `predicted_score` alongside `realized_return` after the horizon passes, enabling live IC monitoring without any rebuild.
 - **Dashboard additions.** `run_metadata` gains `model_version`, `model_family`, `expected_return_is_calibrated` (bool). The Tableau dashboard footer surfaces model version alongside `config_hash`.
 
+### Production integration status — 2026-04-24
+
+- `forecast.engine` now supports `heuristic` and `ml`; `configs/portfolio.yaml` is set to `ml`.
+- The live ML path uses the Phase 2 E8 Ridge + LightGBM regression blend, retrained on available labels at run time and inferred only on the latest cross-section.
+- The production optimizer uses the selected SPY-relative configuration: top 100 assets by latest `dollar_volume_21d` and `optimizer.max_weight: 0.30`.
+- `run_metadata` records `forecast_engine`, `model_version`, `model_family`, and `expected_return_is_calibrated`.
+- The ML score remains uncalibrated; `expected_return` is the optimizer-facing forecast score, not a calibrated return estimate.
+
 ### Phase 4 exit criteria
 
 - `stock-analysis run-one-shot --config configs/portfolio.yaml --forecast-engine ml` runs end-to-end.

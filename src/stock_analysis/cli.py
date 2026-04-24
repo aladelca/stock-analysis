@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal, cast
 
 import typer
 from rich import print
@@ -28,6 +29,11 @@ WORKBOOK_ARGUMENT = typer.Argument(..., help="Path to a .twb workbook to publish
 WORKBOOK_OUTPUT_OPTION = typer.Option(None, "--output", "-o")
 FORCE_OPTION = typer.Option(False, "--force", help="Overwrite an existing experiment id.")
 EXPERIMENT_CONFIG_OPTION = typer.Option(..., "--config", "-c", help="Experiment YAML config.")
+FORECAST_ENGINE_OPTION = typer.Option(
+    None,
+    "--forecast-engine",
+    help="Override forecast.engine for a one-shot run: heuristic or ml.",
+)
 INPUT_RUN_ROOT_OPTION = typer.Option(
     ...,
     "--input-run-root",
@@ -63,9 +69,16 @@ OPTIMIZER_MAX_WEIGHT_OPTION = typer.Option(
 @app.command("run-one-shot")
 def run_one_shot_command(
     config: Path = CONFIG_OPTION,
+    forecast_engine: str | None = FORECAST_ENGINE_OPTION,
 ) -> None:
     configure_logging()
-    result = run_one_shot(load_config(config))
+    portfolio_config = load_config(config)
+    if forecast_engine is not None:
+        if forecast_engine not in {"heuristic", "ml"}:
+            print("[red]--forecast-engine must be either 'heuristic' or 'ml'.[/red]")
+            raise typer.Exit(2)
+        portfolio_config.forecast.engine = cast(Literal["heuristic", "ml"], forecast_engine)
+    result = run_one_shot(portfolio_config)
     print(f"[green]Completed run[/green] {result.run_id}")
     print(f"Recommendations: {result.recommendations_path}")
 
