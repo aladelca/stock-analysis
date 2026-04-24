@@ -2,27 +2,41 @@
 
 ## Summary
 
-The current research backtest shows the ML optimizer outperforming SPY on point estimates over the
-tested window.
+The E8 Ridge + LightGBM optimizer was rerun with the production trade-aware cost model:
 
-These reported figures are the pre-trade-aware research baseline using the earlier 5 bps cost
-assumption. The production optimizer now supports a 2% commission-rate assumption and current
-holdings. A new research run should be generated before comparing the trade-aware production model
-against SPY.
+```text
+commission = abs(target_weight - previous_weight) * portfolio_value * 0.02
+```
 
-This is not yet production proof. The run uses current S&P 500 constituents, so survivorship bias is
-present, and the Sharpe-difference confidence interval still includes zero.
+Example:
+
+```text
+portfolio_value = 1000
+recommended buy = 50%
+commission = 0.50 * 1000 * 0.02 = 10
+```
+
+In portfolio-weight terms, the same trade has:
+
+```text
+estimated_commission_weight = 0.50 * 0.02 = 0.01
+```
+
+This cost applies to both buys and sells because both are transactions. With this assumption, the
+current high-turnover E8 model does **not** beat SPY. The strategy is rejected on point estimates:
+negative return, negative active return, and negative information ratio.
 
 ## Test Setup
 
 | Item | Value |
 | --- | --- |
 | Source artifacts | `data/runs/phase2-source-20260424` |
+| Result artifact | `docs/experiments/e8-commission-2pct-20260424.json` |
 | Backtest window | 2022-05-23 to 2026-03-23 |
 | Completed rebalance observations | 46 |
 | Rebalance cadence | 5 business days |
 | Forecast horizon | 5 trading days |
-| Transaction cost | Historical baseline: 5 bps per turnover unit |
+| Transaction cost | 2% of absolute traded notional |
 | Universe | Top 100 assets by latest `dollar_volume_21d` |
 | Portfolio constraints | Long-only, fully invested |
 | Optimizer max weight | 30% |
@@ -30,39 +44,76 @@ present, and the Sharpe-difference confidence interval still includes zero.
 | Turnover penalty | 0.001 |
 | Benchmark | SPY aligned to the same rebalance dates and horizon |
 
+Command:
+
+```bash
+uv run stock-analysis autoresearch-eval \
+  --candidate e8_baseline \
+  --input-run-root data/runs/phase2-source-20260424 \
+  --max-assets 100 \
+  --max-rebalances 48 \
+  --optimizer-max-weight 0.30 \
+  --risk-aversion 10 \
+  --min-trade-weight 0.005 \
+  --lambda-turnover 0.001 \
+  --commission-rate 0.02 \
+  --horizon-days 5 \
+  --rebalance-step-days 5 \
+  --embargo-days 15 \
+  --covariance-lookback-days 252 \
+  --iteration-id e8-commission-2pct-20260424 \
+  --json-output docs/experiments/e8-commission-2pct-20260424.json
+```
+
 ## Results
 
 | Strategy | Cumulative Return | Annualized Return | Annualized Volatility | Sharpe | Max Drawdown | Cumulative Active Return vs SPY | Annualized Active Return vs SPY | Information Ratio |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | SPY buy-and-hold | 15.55% | 17.01% | 15.04% | 1.131 | -11.94% | 0.00% | n/a | n/a |
-| Current heuristic optimizer | 52.05% | 57.69% | 33.46% | 1.724 | -18.67% | 31.59% | 34.22% | 1.168 |
-| Equal-weight S&P 500 | 29.59% | 32.55% | 18.26% | 1.782 | -11.41% | 12.16% | 13.05% | 2.191 |
-| E8 Ridge + LightGBM blend optimizer | 96.74% | 108.66% | 36.38% | 2.987 | -20.27% | 70.27% | 63.60% | 2.212 |
+| E8 Ridge + LightGBM, 2% commission | -43.39% | -46.12% | 36.51% | -1.263 | -44.44% | -51.00% | -71.73% | -2.539 |
 
-## Current Production Candidate
+Additional trade-cost diagnostics:
 
-The current configured model is:
+| Metric | Value |
+| --- | ---: |
+| Mean turnover per rebalance | 68.24% |
+| Mean absolute traded weight per rebalance | 136.48% |
+| Approx. commission drag per rebalance | 2.73% |
+| Sharpe difference vs SPY | -2.394 |
+| Sharpe difference 95% bootstrap CI | [-2.349, -0.560] |
+| Decision | rejected |
+
+The commission drag is large because turnover is high:
 
 ```text
-phase2-e8-ridge-lightgbm-blend-v1
+mean_abs_trade_weight = 2 * mean_turnover = 2 * 0.6824 = 1.3648
+mean_commission_drag = 1.3648 * 0.02 = 0.0273
 ```
 
-It blends Ridge and LightGBM regression forecasts, then sends the scores into the same long-only
-mean-variance optimizer used by the heuristic baseline.
+That means the model pays roughly 2.73% of portfolio value in commission every 5-business-day
+rebalance on average. This overwhelms the forecast edge in the current E8 configuration.
 
-The historical optimizer objective for these results was:
+## Comparison To Previous 5 bps Baseline
+
+The earlier research baseline used a much smaller cost assumption: 5 bps per turnover unit. Under
+that assumption, E8 had a strong point estimate:
+
+| Strategy | Cumulative Return | Annualized Return | Sharpe | Max Drawdown | Information Ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| E8 Ridge + LightGBM, old 5 bps baseline | 96.74% | 108.66% | 2.987 | -20.27% | 2.212 |
+
+That result is no longer the relevant production result if the intended commission is 2% of traded
+notional. The 2% assumption changes the optimizer/backtest economics materially.
+
+## Optimization Model In This Run
+
+The objective was:
 
 ```text
-maximize mu^T w - gamma * w^T Sigma w - lambda_turnover * ||w - w_prev||_1
-```
-
-The current production objective adds explicit commission drag:
-
-```text
-maximize mu^T w
-       - gamma * w^T Sigma w
-       - lambda_turnover * ||w - w_prev||_1
-       - commission_rate * ||w - w_prev||_1
+maximize_w  mu^T w
+          - gamma * w^T Sigma w
+          - lambda_turnover * ||w - w_prev||_1
+          - commission_rate * ||w - w_prev||_1
 ```
 
 Subject to:
@@ -73,11 +124,12 @@ w_i >= 0
 w_i <= max_weight
 ```
 
-In the reported run:
+Parameters:
 
 ```text
 gamma = 10
 lambda_turnover = 0.001
+commission_rate = 0.02
 max_weight = 0.30
 ```
 
@@ -105,104 +157,21 @@ The 15-business-day embargo is deliberately longer than the 5-day target horizon
 latest training label used for a rebalance at `t` ends before the prediction date. This avoids a
 training sample whose forward-return label overlaps the prediction period.
 
-The relevant implementation is:
-
-```text
-train_cutoff = rebalance_date - BDay(embargo_days)
-train rows = date < train_cutoff and target is known
-prediction rows = date == rebalance_date
-covariance rows = return date < rebalance_date
-```
-
 The model receives only numeric feature columns. Columns beginning with `fwd_` are explicitly
 excluded from the prediction feature frame, so forward returns are not passed as predictors.
 
-## Training Time vs Prediction Time
+## Interpretation
 
-Example for a rebalance on `2026-03-23`:
-
-| Stage | Date Logic | What Is Available |
-| --- | --- | --- |
-| Training data | rows with feature dates before `2026-03-02` | Historical features and labels that would already be realized before the prediction date |
-| Prediction data | rows with feature date `2026-03-23` | Same-day point-in-time features only |
-| Risk estimate | daily returns before `2026-03-23` | Historical covariance only |
-| Realized scoring | forward return after `2026-03-23` | Used only after the prediction to evaluate the backtest |
-
-The model is refit at each rebalance using only that rebalance's allowed training window. It does
-not train once on the full dataset and then replay historical predictions.
-
-The one-shot live pipeline is similar but not identical. It trains on rows before the latest feature
-date where the target label is non-null, then predicts the latest cross-section. Because labels near
-the latest date are null until future prices exist, the latest prediction date is not used as a
-training label. However, the live one-shot training path does not currently apply the same explicit
-15-business-day embargo used by the research backtest. Adding that embargo to the live path would
-make production inference more conservative and more consistent with the backtest contract.
-
-## Model Validation Methodology
-
-Validation has three layers:
-
-1. Feature/label leakage tests. Unit tests verify that features at `(ticker, t)` use prices through
-   `t`, while labels use only the configured forward horizon after `t`. Tests also verify embargoed
-   walk-forward splits and train-only preprocessing statistics.
-2. Walk-forward portfolio validation. Each candidate model is evaluated through the same rebalance
-   loop, optimizer, transaction-cost assumption, and SPY alignment. Portfolio returns are calculated
-   only from predictions made at each rebalance date.
-3. SPY-relative comparison. Portfolio period returns and SPY forward returns are aligned by exact
-   rebalance date before calculating active return, tracking error, and information ratio.
-
-The validation metrics reported are:
-
-| Metric | Meaning |
-| --- | --- |
-| Pearson IC | Linear correlation between prediction and realized forward return |
-| Rank IC | Rank correlation between prediction and realized forward return |
-| Sharpe | Annualized return divided by annualized volatility |
-| Max drawdown | Worst cumulative drawdown over the tested period |
-| Active return | Mean portfolio return minus SPY return, annualized |
-| Information ratio | Annualized active return divided by annualized tracking error |
-
-## What Is Still Not Solved
-
-The current result does not have forward-return target leakage inside the rebalance loop, but it is
-still not a final production validation.
-
-Remaining research risks:
-
-- Survivorship bias remains because the universe uses current S&P 500 constituents.
-- Model-selection overfitting is possible because E8 was selected after comparing multiple candidates
-  on the same historical research window.
-- The top-100 liquidity filter uses latest liquidity, which is convenient for research but should be
-  replaced with point-in-time liquidity selection.
-- The result is based on 46 completed rebalances, which is a small sample.
-- The Sharpe-difference confidence interval against SPY includes zero.
-
-So the correct interpretation is:
+The correct interpretation is:
 
 ```text
 No obvious target leakage in the walk-forward prediction loop.
-Still provisional because survivorship bias, latest-liquidity look-ahead risk,
-and model-selection bias remain.
+The E8 model is not viable under a 2% commission-on-traded-notional assumption.
+The primary failure mode is excessive turnover relative to transaction cost.
 ```
 
-## Interpretation
-
-The E8 optimizer produced the strongest result in this run:
-
-- It compounded to 96.74% over the tested rebalance periods.
-- It beat aligned SPY by 70.27% cumulatively.
-- It produced a 2.987 Sharpe versus 1.131 for SPY.
-- It generated 63.60% annualized active return versus SPY.
-
-The result is still provisional because the bootstrap Sharpe-difference 95% confidence interval
-against SPY was:
-
-```text
-[-0.446, 1.542]
-```
-
-That interval includes zero, so the point estimate is strong but not statistically conclusive under
-the stricter promotion rule.
+This does not prove the forecast model has no signal. It proves that the current optimizer settings
+and rebalance cadence are not compatible with a 2% commission assumption.
 
 ## Limitations
 
@@ -211,15 +180,13 @@ the stricter promotion rule.
 - E8 was selected after research comparisons on the same historical window.
 - The universe is restricted to the top 100 names by latest liquidity.
 - The backtest has only 46 completed rebalance observations.
-- Transaction costs are simplified and do not include market impact.
-- Turnover is high for the ML optimizer, approximately 68.67% per rebalance.
+- Transaction costs are simplified and do not include bid/ask spread or market impact.
 - The optimizer allows 30% max single-name weight, which is aggressive for a diversified portfolio.
 
 ## Recommended Next Steps
 
-1. Replace current-constituent membership with point-in-time S&P 500 membership.
-2. Run a full unsampled weekly backtest across all available dates.
-3. Add benchmark-relative exposure constraints and rerun with the production sector cap.
-4. Sweep transaction costs and turnover penalties around the E8 model.
-5. Promote only after out-of-sample validation where the Sharpe-difference confidence interval
-   excludes zero.
+1. Increase the turnover penalty substantially and rerun the same SPY-relative backtest.
+2. Test a longer rebalance cadence, such as 21 trading days, to reduce transaction frequency.
+3. Add a no-trade band so small signal changes do not trigger expensive rebalances.
+4. Lower max single-name weight and add sector caps for a more realistic production portfolio.
+5. Replace current-constituent membership and latest-liquidity selection with point-in-time inputs.

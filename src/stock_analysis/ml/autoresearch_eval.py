@@ -36,6 +36,7 @@ RESULT_COLUMNS: tuple[str, ...] = (
     "max_assets",
     "max_rebalances",
     "optimizer_max_weight",
+    "commission_rate",
     "cost_bps",
     "candidate_sharpe",
     "spy_sharpe",
@@ -75,6 +76,7 @@ class AutoresearchEvalConfig:
     risk_aversion: float = 10.0
     min_trade_weight: float = 0.005
     lambda_turnover: float = 0.001
+    commission_rate: float = 0.02
     horizon_days: int | None = None
     rebalance_step_days: int = 5
     embargo_days: int = 15
@@ -101,12 +103,14 @@ def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
             risk_aversion=config.risk_aversion,
             min_trade_weight=config.min_trade_weight,
             lambda_turnover=config.lambda_turnover,
+            commission_rate=config.commission_rate,
         ),
         BacktestConfig(
             horizon_days=horizon_days,
             training_target_column=candidate.training_target_column,
             rebalance_step_days=config.rebalance_step_days,
             embargo_days=config.embargo_days,
+            commission_rate=config.commission_rate,
             cost_bps=config.cost_bps,
             covariance_lookback_days=config.covariance_lookback_days,
             feature_columns=feature_columns,
@@ -237,6 +241,7 @@ def result_to_tsv_row(result: dict[str, Any]) -> dict[str, object]:
         "max_assets": config.get("max_assets", ""),
         "max_rebalances": config.get("max_rebalances", ""),
         "optimizer_max_weight": config.get("optimizer_max_weight", ""),
+        "commission_rate": config.get("commission_rate", ""),
         "cost_bps": config.get("cost_bps", ""),
         "candidate_sharpe": metrics.get("candidate_sharpe", ""),
         "spy_sharpe": metrics.get("spy_sharpe", ""),
@@ -413,6 +418,7 @@ def _config_payload(config: AutoresearchEvalConfig, horizon_days: int) -> dict[s
         "risk_aversion": config.risk_aversion,
         "min_trade_weight": config.min_trade_weight,
         "lambda_turnover": config.lambda_turnover,
+        "commission_rate": config.commission_rate,
         "horizon_days": horizon_days,
         "rebalance_step_days": config.rebalance_step_days,
         "embargo_days": config.embargo_days,

@@ -23,6 +23,7 @@ uv run python scripts/autoresearch_eval.py \
   --max-assets 100 \
   --max-rebalances 48 \
   --optimizer-max-weight 0.30 \
+  --commission-rate 0.02 \
   --results-tsv experiments/autoresearch/results.tsv
 ```
 
@@ -40,6 +41,7 @@ uv run --extra mlflow python scripts/autoresearch_eval.py \
   --max-assets 100 \
   --max-rebalances 48 \
   --optimizer-max-weight 0.30 \
+  --commission-rate 0.02 \
   --results-tsv experiments/autoresearch/results.tsv \
   --mlflow \
   --mlflow-tracking-uri sqlite:///data/mlflow/mlflow.db

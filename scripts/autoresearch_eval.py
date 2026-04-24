@@ -33,6 +33,12 @@ def main() -> int:
     parser.add_argument("--risk-aversion", type=float, default=10.0)
     parser.add_argument("--min-trade-weight", type=float, default=0.005)
     parser.add_argument("--lambda-turnover", type=float, default=0.001)
+    parser.add_argument(
+        "--commission-rate",
+        type=float,
+        default=0.02,
+        help="Commission rate applied to absolute traded notional.",
+    )
     parser.add_argument("--horizon-days", type=int, default=None)
     parser.add_argument("--rebalance-step-days", type=int, default=5)
     parser.add_argument("--embargo-days", type=int, default=15)
@@ -79,6 +85,7 @@ def main() -> int:
             risk_aversion=args.risk_aversion,
             min_trade_weight=args.min_trade_weight,
             lambda_turnover=args.lambda_turnover,
+            commission_rate=args.commission_rate,
             horizon_days=args.horizon_days,
             rebalance_step_days=args.rebalance_step_days,
             embargo_days=args.embargo_days,

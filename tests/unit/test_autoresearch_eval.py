@@ -100,6 +100,7 @@ def test_result_to_tsv_row_uses_stable_columns() -> None:
             "max_assets": 100,
             "max_rebalances": 48,
             "optimizer_max_weight": 0.3,
+            "commission_rate": 0.02,
             "cost_bps": 5.0,
         },
         "metrics": {
@@ -120,6 +121,7 @@ def test_result_to_tsv_row_uses_stable_columns() -> None:
 
     assert tuple(row) == RESULT_COLUMNS
     assert row["candidate_id"] == "candidate"
+    assert row["commission_rate"] == 0.02
     assert row["information_ratio"] == 2.0
 
 
