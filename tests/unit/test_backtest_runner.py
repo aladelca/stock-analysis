@@ -53,10 +53,16 @@ def test_walk_forward_backtest_records_weights_and_costs() -> None:
         pd.DataFrame(label_rows),
         pd.DataFrame(return_rows),
         lambda train: MomentumModel(),
-        OptimizerConfig(max_weight=0.6, risk_aversion=0.1, lambda_turnover=0.001),
+        OptimizerConfig(
+            max_weight=0.6,
+            risk_aversion=0.1,
+            lambda_turnover=0.001,
+            commission_rate=0.02,
+        ),
         BacktestConfig(
             horizon_days=5,
             embargo_days=10,
+            commission_rate=0.02,
             covariance_lookback_days=20,
             max_rebalances=3,
         ),
@@ -64,4 +70,15 @@ def test_walk_forward_backtest_records_weights_and_costs() -> None:
 
     assert not result.empty
     assert result.groupby("rebalance_date")["target_weight"].sum().iloc[0] == pytest.approx(1.0)
-    assert {"portfolio_gross_return", "portfolio_net_return", "turnover"} <= set(result.columns)
+    assert {
+        "portfolio_gross_return",
+        "portfolio_net_return",
+        "turnover",
+        "trade_abs_weight",
+        "commission_rate",
+    } <= set(result.columns)
+    first = result.drop_duplicates("rebalance_date").iloc[0]
+    assert first["transaction_cost"] == pytest.approx(0.02 * first["trade_abs_weight"])
+    assert first["portfolio_net_return"] == pytest.approx(
+        first["portfolio_gross_return"] - first["transaction_cost"]
+    )

@@ -94,8 +94,15 @@ class OptimizerConfig(BaseModel):
     max_weight: float = Field(default=0.05, gt=0, le=1)
     risk_aversion: float = Field(default=10.0, ge=0)
     min_trade_weight: float = Field(default=0.005, ge=0)
+    min_rebalance_trade_weight: float = Field(default=0.005, ge=0)
     lambda_turnover: float = Field(default=0.001, ge=0)
+    commission_rate: float = Field(default=0.02, ge=0, le=1)
+    sector_max_weight: float | None = Field(default=None, gt=0, le=1)
     solver: str | None = None
+
+
+class PortfolioStateConfig(BaseModel):
+    current_holdings_path: Path | None = None
 
 
 class TableauConfig(BaseModel):
@@ -111,6 +118,12 @@ class TableauConfig(BaseModel):
     workbook_output_path: Path = Path("tableau/workbooks/portfolio_recommendations.twb")
 
 
+class MLflowConfig(BaseModel):
+    enabled: bool = False
+    tracking_uri: str | None = None
+    experiment_name: str = "stock-analysis-portfolio"
+
+
 class PortfolioConfig(BaseModel):
     run: RunConfig = Field(default_factory=RunConfig)
     universe: UniverseConfig = Field(default_factory=UniverseConfig)
@@ -119,7 +132,9 @@ class PortfolioConfig(BaseModel):
     panel_features: PanelFeatureConfig = Field(default_factory=PanelFeatureConfig)
     forecast: ForecastConfig = Field(default_factory=ForecastConfig)
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    portfolio_state: PortfolioStateConfig = Field(default_factory=PortfolioStateConfig)
     tableau: TableauConfig = Field(default_factory=TableauConfig)
+    mlflow: MLflowConfig = Field(default_factory=MLflowConfig)
 
 
 def load_config(path: Path) -> PortfolioConfig:

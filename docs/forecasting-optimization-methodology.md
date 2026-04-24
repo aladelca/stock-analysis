@@ -286,12 +286,28 @@ In vector notation:
 w = [w_1, w_2, ..., w_N]^T
 ```
 
-### Objective Function
-
-The MVP solves a long-only mean-variance-style quadratic optimization problem:
+The trade-aware layer also uses the current portfolio weights:
 
 ```text
-maximize_w  mu^T w - gamma * w^T Sigma w
+w_prev_i = current portfolio weight for asset i before rebalance
+```
+
+Current weights come from `portfolio_state.current_holdings_path`. If no holdings file is
+configured, the run is treated as a first allocation:
+
+```text
+w_prev_i = 0 for all optimizer assets
+```
+
+### Objective Function
+
+The optimizer solves a long-only, trade-aware mean-variance-style quadratic optimization problem:
+
+```text
+maximize_w  mu^T w
+          - gamma * w^T Sigma w
+          - lambda_turnover * ||w - w_prev||_1
+          - commission_rate * ||w - w_prev||_1
 ```
 
 Interpretation:
@@ -299,13 +315,22 @@ Interpretation:
 - `mu^T w` rewards assets with higher forecast scores.
 - `w^T Sigma w` penalizes portfolio variance.
 - `gamma` controls the return-score versus risk tradeoff.
+- `||w - w_prev||_1` measures absolute traded portfolio weight.
+- `lambda_turnover` discourages unnecessary rebalance churn.
+- `commission_rate` models direct transaction cost. The default production assumption is `0.02`,
+  meaning 2% of the absolute traded notional.
 - Larger `gamma` produces a more risk-averse allocation.
 - Smaller `gamma` allows more concentration in high-score assets, subject to constraints.
 
 This is implemented with CVXPY as:
 
 ```text
-Maximize(mu @ weights - risk_aversion * quad_form(weights, Sigma))
+Maximize(
+    mu @ weights
+    - risk_aversion * quad_form(weights, Sigma)
+    - lambda_turnover * norm1(weights - previous_weights)
+    - commission_rate * norm1(weights - previous_weights)
+)
 ```
 
 ### Constraints
@@ -339,6 +364,22 @@ w_i <= 0.05
 ```
 
 No single asset can receive more than 5% of portfolio weight.
+
+#### Optional Sector Cap
+
+If `optimizer.sector_max_weight` is configured, each sector receives an aggregate upper bound:
+
+```text
+sum_{i in sector s} w_i <= sector_max_weight
+```
+
+The default production config uses:
+
+```text
+sector_max_weight = 0.35
+```
+
+This prevents the optimizer from allocating too much of the portfolio to one GICS sector.
 
 #### Eligibility Constraint
 
@@ -394,38 +435,52 @@ Each row contains:
 - `gics_sector`
 - `expected_return`
 - `volatility`
+- `current_weight`
 - `target_weight`
+- `trade_weight`
+- `trade_abs_weight`
+- `estimated_commission_weight`
+- `net_trade_weight_after_commission`
+- `cash_required_weight`
+- `cash_released_weight`
+- `rebalance_required`
 - `action`
 - `reason_code`
 - `as_of_date`
 - `run_id`
 
-Current action logic:
-
-```text
-if target_weight >= min_trade_weight:
-  action = BUY
-else:
-  action = EXCLUDE
-```
-
-Because the MVP does not yet ingest a current portfolio, it does not calculate true sell orders. A future version should compare current holdings against target weights:
+Trade math:
 
 ```text
 trade_weight_i = target_weight_i - current_weight_i
+trade_abs_weight_i = abs(trade_weight_i)
+estimated_commission_weight_i = commission_rate * trade_abs_weight_i
 ```
 
-Then:
+Action logic:
 
 ```text
-BUY  if trade_weight_i > threshold
-SELL if trade_weight_i < -threshold
-HOLD otherwise
+BUY     if trade_weight_i >= min_rebalance_trade_weight
+SELL    if trade_weight_i <= -min_rebalance_trade_weight
+HOLD    if abs(trade_weight_i) < min_rebalance_trade_weight
+        and (target_weight_i > 0 or current_weight_i > 0)
+EXCLUDE if target_weight_i = 0 and current_weight_i = 0
+```
+
+Current holdings that are not in the optimizer universe are preserved in the recommendation output
+as `SELL` rows with `target_weight = 0`. This keeps unsupported positions visible instead of
+dropping them silently.
+
+Cash-flow helper fields:
+
+```text
+cash_required_weight_i = trade_weight_i + estimated_commission_weight_i for BUY rows
+cash_released_weight_i = trade_abs_weight_i - estimated_commission_weight_i for SELL rows
 ```
 
 ### `portfolio_risk_metrics`
 
-The MVP reports:
+The pipeline reports:
 
 ```text
 expected_return = mu^T w
@@ -457,28 +512,29 @@ Sector exposure is computed as:
 sector_weight_s = sum_{i in sector s} w_i
 ```
 
-There is currently no sector cap constraint. Sector exposure is diagnostic only.
+When `optimizer.sector_max_weight` is configured, the same sector exposure calculation is also used
+as an optimization constraint.
 
 ## Scientific Assumptions
 
-The MVP assumes:
+The current implementation assumes:
 
 - Historical adjusted prices are sufficient for a first baseline model.
 - Medium-term momentum contains useful cross-sectional information.
 - Recent volatility is a meaningful penalty for unstable assets.
 - Empirical covariance over the latest 252 trading days is an acceptable first-pass portfolio risk model.
 - Long-only mean-variance optimization is a reasonable starting point for portfolio construction.
-- A 5% max-weight cap reduces single-name concentration risk.
+- A max-weight cap reduces single-name concentration risk.
+- A configurable sector cap reduces sector concentration risk.
+- Current holdings are supplied as portfolio weights or market values, not share lots.
 
 ## Known Limitations
 
 - The forecast score is not calibrated to realized future returns.
-- The model has not yet been backtested walk-forward.
 - Missing returns are filled with zero in the covariance matrix, which can understate risk for sparse assets.
-- There is no transaction cost model.
-- There is no turnover constraint.
-- There is no current portfolio input, so outputs are target allocations rather than executable rebalance trades.
-- There are no sector, industry, beta, or liquidity constraints yet.
+- Transaction costs are modeled as a flat percentage commission, not market impact or spread cost.
+- Current portfolio input is weight-based; share-count order generation is not implemented.
+- There are no industry, beta, or liquidity constraints yet.
 - The covariance matrix uses a simple empirical estimator rather than shrinkage or factor risk modeling.
 - The optimizer can produce tiny numerical weights due to solver tolerance.
 

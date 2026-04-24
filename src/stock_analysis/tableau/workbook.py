@@ -56,7 +56,7 @@ class PortfolioWorkbookSpec:
 
 FIELDS: dict[str, TableauField] = {
     "run_id": TableauField("run_id", "string", "dimension", "nominal", "Run ID"),
-    "as_of_date": TableauField("as_of_date", "string", "dimension", "nominal", "As Of Date"),
+    "as_of_date": TableauField("as_of_date", "date", "dimension", "nominal", "As Of Date"),
     "ticker": TableauField("ticker", "string", "dimension", "nominal", "Ticker"),
     "security": TableauField("security", "string", "dimension", "nominal", "Security"),
     "gics_sector": TableauField("gics_sector", "string", "dimension", "nominal", "GICS Sector"),
@@ -67,8 +67,51 @@ FIELDS: dict[str, TableauField] = {
     "target_weight": TableauField(
         "target_weight", "real", "measure", "quantitative", "Target Weight"
     ),
+    "current_weight": TableauField(
+        "current_weight", "real", "measure", "quantitative", "Current Weight"
+    ),
+    "trade_weight": TableauField("trade_weight", "real", "measure", "quantitative", "Trade Weight"),
+    "trade_abs_weight": TableauField(
+        "trade_abs_weight", "real", "measure", "quantitative", "Trade Abs Weight"
+    ),
+    "rebalance_required": TableauField(
+        "rebalance_required", "boolean", "dimension", "nominal", "Rebalance Required"
+    ),
+    "estimated_commission_weight": TableauField(
+        "estimated_commission_weight",
+        "real",
+        "measure",
+        "quantitative",
+        "Estimated Commission Weight",
+    ),
+    "net_trade_weight_after_commission": TableauField(
+        "net_trade_weight_after_commission",
+        "real",
+        "measure",
+        "quantitative",
+        "Net Trade Weight After Commission",
+    ),
+    "cash_required_weight": TableauField(
+        "cash_required_weight", "real", "measure", "quantitative", "Cash Required Weight"
+    ),
+    "cash_released_weight": TableauField(
+        "cash_released_weight", "real", "measure", "quantitative", "Cash Released Weight"
+    ),
+    "current_weight_label": TableauField(
+        "current_weight_label", "string", "dimension", "nominal", "Current Weight Label"
+    ),
     "target_weight_label": TableauField(
         "target_weight_label", "string", "dimension", "nominal", "Target Weight Label"
+    ),
+    "trade_weight_label": TableauField(
+        "trade_weight_label", "string", "dimension", "nominal", "Trade Weight Label"
+    ),
+    "estimated_commission_weight_label": TableauField(
+        "estimated_commission_weight_label",
+        "string",
+        "dimension",
+        "nominal",
+        "Estimated Commission Weight Label",
     ),
     "selected": TableauField("selected", "boolean", "dimension", "nominal", "Selected"),
     "scatter_size": TableauField("scatter_size", "real", "measure", "quantitative", "Scatter Size"),
@@ -104,10 +147,10 @@ FIELDS: dict[str, TableauField] = {
         "portfolio_concentration_hhi", "real", "measure", "quantitative", "Concentration HHI"
     ),
     "run_requested_as_of_date": TableauField(
-        "run_requested_as_of_date", "string", "dimension", "nominal", "Requested Data Date"
+        "run_requested_as_of_date", "date", "dimension", "nominal", "Requested Data Date"
     ),
     "run_data_as_of_date": TableauField(
-        "run_data_as_of_date", "string", "dimension", "nominal", "Market Data Date"
+        "run_data_as_of_date", "date", "dimension", "nominal", "Market Data Date"
     ),
     "is_data_date_lagged": TableauField(
         "is_data_date_lagged", "boolean", "dimension", "nominal", "Data Date Lagged"
@@ -168,6 +211,30 @@ FIELDS: dict[str, TableauField] = {
         "Holding Weight Label",
         "IF [target_weight] > 0 THEN [target_weight_label] END",
     ),
+    "trade_ticker": TableauField(
+        "trade_ticker",
+        "string",
+        "dimension",
+        "nominal",
+        "Trade Ticker",
+        "IF [rebalance_required] THEN [ticker] END",
+    ),
+    "trade_size": TableauField(
+        "trade_size",
+        "real",
+        "measure",
+        "quantitative",
+        "Trade Size",
+        "IF [rebalance_required] THEN [trade_abs_weight] END",
+    ),
+    "trade_description": TableauField(
+        "trade_description",
+        "string",
+        "dimension",
+        "nominal",
+        "Trade Description",
+        'IF [rebalance_required] THEN [action] + " " + [ticker] + " " + [trade_weight_label] END',
+    ),
 }
 
 
@@ -211,6 +278,17 @@ WORKSHEETS: tuple[WorksheetSpec, ...] = (
             ("color", ShelfField("gics_sector")),
             ("text", ShelfField("holding_weight_label")),
             ("tooltip", ShelfField("reason_code")),
+        ),
+    ),
+    WorksheetSpec(
+        name="Trade Tickets",
+        mark_class="Bar",
+        rows=(ShelfField("action"), ShelfField("trade_ticker"), ShelfField("security")),
+        cols=(ShelfField("trade_size", "Sum"),),
+        encodings=(
+            ("color", ShelfField("action")),
+            ("text", ShelfField("trade_description")),
+            ("tooltip", ShelfField("estimated_commission_weight_label")),
         ),
     ),
     WorksheetSpec(
@@ -454,11 +532,13 @@ def _add_dashboards(root: ET._Element, spec: PortfolioWorkbookSpec) -> None:
     for index, sheet_name in enumerate(kpi_names):
         _sheet_zone(kpi_zone, 3 + index, kpi_width * index, 0, kpi_width, 14000, sheet_name)
 
-    body_zone = _layout_zone(root_zone, 20, 0, 14000, 100000, 76000, "horz")
-    _sheet_zone(body_zone, 21, 0, 14000, 45000, 76000, "Holdings by Weight")
-    right_zone = _layout_zone(body_zone, 22, 45000, 14000, 55000, 76000, "vert")
-    _sheet_zone(right_zone, 23, 45000, 14000, 55000, 36000, "Sector Allocation")
-    _sheet_zone(right_zone, 24, 45000, 50000, 55000, 40000, "Risk Forecast Scatter")
+    body_zone = _layout_zone(root_zone, 20, 0, 14000, 100000, 76000, "vert")
+    main_zone = _layout_zone(body_zone, 21, 0, 14000, 100000, 52000, "horz")
+    _sheet_zone(main_zone, 22, 0, 14000, 43000, 52000, "Holdings by Weight")
+    right_zone = _layout_zone(main_zone, 23, 43000, 14000, 57000, 52000, "vert")
+    _sheet_zone(right_zone, 24, 43000, 14000, 57000, 25000, "Sector Allocation")
+    _sheet_zone(right_zone, 25, 43000, 39000, 57000, 27000, "Risk Forecast Scatter")
+    _sheet_zone(body_zone, 26, 0, 66000, 100000, 24000, "Trade Tickets")
 
     _sheet_zone(root_zone, 30, 0, 90000, 100000, 10000, "Freshness Footer")
     _append_layout_zone_styles(root_zone)

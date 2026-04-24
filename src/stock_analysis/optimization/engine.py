@@ -41,12 +41,15 @@ def optimize_long_only(
     utility = mu @ weights - config.risk_aversion * cp.quad_form(weights, cp.psd_wrap(cov))
     if config.lambda_turnover > 0:
         utility -= config.lambda_turnover * cp.norm1(weights - previous_weights)
+    if config.commission_rate > 0:
+        utility -= config.commission_rate * cp.norm1(weights - previous_weights)
     objective = cp.Maximize(utility)
     constraints = [
         cp.sum(weights) == 1,
         weights >= 0,
         weights <= config.max_weight,
     ]
+    constraints.extend(_sector_constraints(eligible, weights, config))
     problem = cp.Problem(objective, constraints)
 
     solvers = [config.solver] if config.solver else ["CLARABEL", "OSQP", "SCS", None]
@@ -86,3 +89,18 @@ def _align_previous_weights(
     else:
         aligned = pd.Series(w_prev, dtype=float).reindex(tickers).fillna(0)
     return aligned.to_numpy(dtype=float)
+
+
+def _sector_constraints(
+    eligible: pd.DataFrame,
+    weights: cp.Variable,
+    config: OptimizerConfig,
+) -> list[cp.Constraint]:
+    if config.sector_max_weight is None or "gics_sector" not in eligible.columns:
+        return []
+    sectors = eligible["gics_sector"].fillna("Unknown").astype(str)
+    constraints: list[cp.Constraint] = []
+    for sector in sorted(sectors.unique()):
+        mask = (sectors == sector).astype(float).to_numpy()
+        constraints.append(cp.sum(cp.multiply(mask, weights)) <= config.sector_max_weight)
+    return constraints

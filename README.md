@@ -2,12 +2,12 @@
 
 One-shot, end-of-day S&P 500 portfolio assistant.
 
-The MVP retrieves a current S&P 500 universe, loads free historical end-of-day prices, builds medallion data outputs, computes simple price-derived forecast signals, optimizes a long-only portfolio in Python, and emits Tableau Prep-ready dashboard marts.
+The MVP retrieves a current S&P 500 universe, loads free historical end-of-day prices, builds medallion data outputs, forecasts portfolio scores, optimizes a long-only trade-aware portfolio in Python, logs enabled runs to MLflow, and emits Tableau Prep-ready dashboard marts.
 
 ## Quickstart
 
 ```bash
-uv sync --dev
+uv sync --extra mlflow --dev
 uv run stock-analysis run-one-shot --config configs/portfolio.yaml
 ```
 

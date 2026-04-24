@@ -222,7 +222,10 @@ For holdings and scatter marks, include:
 
 - Ticker and company name.
 - Sector.
+- Current weight.
 - Target weight.
+- Trade weight.
+- Estimated commission.
 - Forecast score.
 - Volatility.
 - Action.
@@ -232,17 +235,16 @@ For holdings and scatter marks, include:
 
 ## Current V1 Caveats
 
-- BUY means selected into the target allocation. It is not yet a broker order.
-- EXCLUDE means not selected or below the display/trade threshold.
-- True BUY/SELL/HOLD requires prior portfolio weights.
+- BUY, SELL, and HOLD are portfolio-weight rebalance recommendations, not broker-submitted orders.
+- Current holdings must be supplied for true sell/hold semantics. Without a holdings file, the run
+  is first-allocation mode and most selected assets appear as BUY.
+- EXCLUDE means no current position and no target allocation.
 - `forecast_score` is heuristic and should not be labeled as a guaranteed expected return.
 - No time-series chart should be added until multi-run history is intentionally modeled.
 
 ## Future Enhancements
 
-- Add prior weights and `delta_weight`.
-- Add real BUY/SELL/HOLD action semantics.
-- Add sector caps and sector cap reference lines.
+- Add sector cap reference lines.
 - Add benchmark-relative diagnostics.
 - Add a historical run table for trend charts.
 

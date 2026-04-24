@@ -1017,6 +1017,7 @@ def _backtest_config_for_spec(spec: ExperimentSpec, config: Phase2Config) -> Bac
         training_target_column=spec.training_target_column,
         rebalance_step_days=config.backtest.rebalance_step_days,
         embargo_days=config.backtest.embargo_days,
+        commission_rate=config.backtest.commission_rate,
         cost_bps=config.backtest.cost_bps,
         covariance_lookback_days=config.backtest.covariance_lookback_days,
         feature_columns=spec.feature_columns,
@@ -1091,6 +1092,7 @@ def _track_phase2_run(
                 "horizon_days": config.backtest.horizon_days,
                 "rebalance_step_days": config.backtest.rebalance_step_days,
                 "embargo_days": config.backtest.embargo_days,
+                "commission_rate": config.backtest.commission_rate,
                 "cost_bps": config.backtest.cost_bps,
             },
         },
@@ -1300,6 +1302,7 @@ def _replace_backtest(backtest: BacktestConfig, **updates: Any) -> BacktestConfi
         ),
         rebalance_step_days=updates.get("rebalance_step_days", backtest.rebalance_step_days),
         embargo_days=updates.get("embargo_days", backtest.embargo_days),
+        commission_rate=updates.get("commission_rate", backtest.commission_rate),
         cost_bps=updates.get("cost_bps", backtest.cost_bps),
         covariance_lookback_days=updates.get(
             "covariance_lookback_days", backtest.covariance_lookback_days

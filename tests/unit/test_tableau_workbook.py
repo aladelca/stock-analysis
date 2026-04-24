@@ -51,6 +51,7 @@ def test_portfolio_workbook_contains_dashboard_sheets(tmp_path: Path) -> None:
         "KPI Return Vol",
         "KPI Weight Sum",
         "Holdings by Weight",
+        "Trade Tickets",
         "Sector Allocation",
         "Risk Forecast Scatter",
         "Freshness Footer",
@@ -60,6 +61,7 @@ def test_portfolio_workbook_contains_dashboard_sheets(tmp_path: Path) -> None:
     assert dashboard is not None
     zone_names = {node.attrib["name"] for node in dashboard.findall(".//zone[@name]")}
     assert "Holdings by Weight" in zone_names
+    assert "Trade Tickets" in zone_names
     assert "Sector Allocation" in zone_names
     assert "Risk Forecast Scatter" in zone_names
 
@@ -123,6 +125,11 @@ def test_portfolio_workbook_uses_expected_fields_and_calculation(tmp_path: Path)
     assert "[portfolio_footer_label]" in field_names
     assert "[holding_ticker]" in field_names
     assert "[holding_weight]" in field_names
+    assert "[current_weight]" in field_names
+    assert "[trade_weight]" in field_names
+    assert "[estimated_commission_weight]" in field_names
+    assert "[trade_ticker]" in field_names
+    assert "[trade_size]" in field_names
 
     footer_calc = datasource.find("./column[@name='[portfolio_footer_label]']/calculation")
     assert footer_calc is not None
@@ -132,3 +139,7 @@ def test_portfolio_workbook_uses_expected_fields_and_calculation(tmp_path: Path)
     holding_calc = datasource.find("./column[@name='[holding_weight]']/calculation")
     assert holding_calc is not None
     assert "[target_weight] > 0" in holding_calc.attrib["formula"]
+
+    trade_calc = datasource.find("./column[@name='[trade_ticker]']/calculation")
+    assert trade_calc is not None
+    assert "[rebalance_required]" in trade_calc.attrib["formula"]

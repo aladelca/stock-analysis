@@ -22,6 +22,7 @@ class BacktestConfig:
     training_target_column: str | None = None
     rebalance_step_days: int = 5
     embargo_days: int = 15
+    commission_rate: float | None = None
     cost_bps: float = 5.0
     covariance_lookback_days: int = 252
     feature_columns: tuple[str, ...] = ()
@@ -116,8 +117,16 @@ def run_walk_forward_backtest(
             if previous_weights is None
             else previous_weights.reindex(weights.index).fillna(0)
         )
-        turnover = float(0.5 * np.abs(weights - aligned_previous).sum())
-        period_cost = cfg.cost_bps / 10_000 * turnover
+        trade_abs_weight = float(np.abs(weights - aligned_previous).sum())
+        turnover = 0.5 * trade_abs_weight
+        commission_rate = (
+            optimizer_config.commission_rate if cfg.commission_rate is None else cfg.commission_rate
+        )
+        period_cost = (
+            commission_rate * trade_abs_weight
+            if commission_rate > 0
+            else cfg.cost_bps / 10_000 * turnover
+        )
 
         realized = features_at_rebalance.set_index("ticker")[realized_target_col].astype(float)
         gross_return = float((weights * realized.reindex(weights.index).fillna(0)).sum())
@@ -137,6 +146,8 @@ def run_walk_forward_backtest(
                     "transaction_cost": period_cost,
                     "portfolio_net_return": net_return,
                     "turnover": turnover,
+                    "trade_abs_weight": trade_abs_weight,
+                    "commission_rate": commission_rate,
                 }
             )
         previous_weights = weights

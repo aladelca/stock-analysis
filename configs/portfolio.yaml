@@ -47,8 +47,14 @@ optimizer:
   max_weight: 0.30
   risk_aversion: 10.0
   min_trade_weight: 0.005
+  min_rebalance_trade_weight: 0.005
   lambda_turnover: 0.001
+  commission_rate: 0.02
+  sector_max_weight: 0.35
   solver: null
+
+portfolio_state:
+  current_holdings_path: null
 
 tableau:
   export_csv: true
@@ -61,3 +67,8 @@ tableau:
   datasource_name: portfolio_dashboard_mart
   workbook_name: portfolio_recommendations
   workbook_output_path: tableau/workbooks/portfolio_recommendations.twb
+
+mlflow:
+  enabled: true
+  tracking_uri: sqlite:///data/mlflow/mlflow.db
+  experiment_name: stock-analysis-portfolio

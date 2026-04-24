@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -55,4 +56,7 @@ def _sql_type_for_series(series: pd.Series):
         return SqlType.double()
     if pd.api.types.is_bool_dtype(series):
         return SqlType.bool()
+    non_null = series.dropna()
+    if not non_null.empty and non_null.map(lambda value: isinstance(value, date)).all():
+        return SqlType.date()
     return SqlType.text()

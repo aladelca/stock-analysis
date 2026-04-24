@@ -139,11 +139,15 @@ The workbook should use these fields from `portfolio_dashboard_mart`:
 | `gics_sector` | color and sector grouping |
 | `forecast_score` | y-axis and holdings signal field |
 | `volatility` | x-axis and risk field |
+| `current_weight` | prior portfolio allocation |
 | `target_weight` | allocation, treemap size, weight sanity check |
 | `target_weight_label` | formatted display |
+| `trade_weight` | signed buy/sell percentage |
+| `trade_abs_weight` | trade ticket bar size |
+| `estimated_commission_weight` | trade cost tooltip/KPI |
 | `selected` | filter selected holdings and style scatter |
 | `scatter_size` | selected names scale by weight; excluded names stay small |
-| `action` | current BUY/EXCLUDE signal |
+| `action` | BUY/SELL/HOLD/EXCLUDE signal |
 | `reason_code` | explanation tooltip |
 | `sector_target_weight` | optional sector tooltip |
 | `portfolio_expected_return` | portfolio forecast-score KPI |
@@ -202,6 +206,7 @@ If you prefer to build manually instead of using the generator, create sheets:
 | `kpi_return_per_vol` | Text | `MAX([portfolio_return_per_vol])` |
 | `kpi_weight_sum` | Text | `SUM([target_weight])` |
 | `holdings_table` | Table/bar | filter `[selected] = true`; sort by `target_weight` desc |
+| `trade_tickets` | Bar | filter `[rebalance_required] = true`; sort by `trade_abs_weight` desc |
 | `sector_treemap` | Square | group by `gics_sector`; size by `SUM([target_weight])` |
 | `risk_return_scatter` | Circle | x `volatility`; y `forecast_score`; size `scatter_size`; color by `gics_sector`; detail `ticker` |
 | `freshness_footer` | Text | `run_id`, `run_data_as_of_date`, `run_requested_as_of_date`, `run_config_hash_short` |
@@ -264,10 +269,11 @@ Refresh the workbook in Tableau Cloud. If `run_id` changes in the footer, the lo
 
 ## Known V1 Limitations
 
-- `action` currently supports BUY and EXCLUDE. True BUY/SELL/HOLD requires prior holdings.
+- `action` supports BUY, SELL, HOLD, and EXCLUDE, but true sell/hold semantics require a configured
+  current holdings file.
 - `forecast_score` is a heuristic score, not a calibrated expected return.
 - No time-series dashboard yet because the mart is one run, one decision.
-- No sector cap constraint yet; sector exposure is diagnostic.
+- Sector exposure is shown, but benchmark-relative sector bands are not implemented.
 
 ## Validation Checklist
 

@@ -4,7 +4,14 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from stock_analysis.ml.mlflow_tracking import log_autoresearch_result, resolve_tracking_uri
+import pandas as pd
+
+from stock_analysis.config import OptimizerConfig, PortfolioConfig
+from stock_analysis.ml.mlflow_tracking import (
+    log_autoresearch_result,
+    log_portfolio_run,
+    resolve_tracking_uri,
+)
 
 
 class _FakeRun:
@@ -120,6 +127,61 @@ def test_log_autoresearch_result_sets_local_artifact_location_for_sqlite(
     assert fake_mlflow.tracking_uri.startswith("sqlite:////")
     assert fake_mlflow.created_experiment == "experiment"
     assert fake_mlflow.artifact_location.startswith("file://")
+
+
+def test_log_portfolio_run_logs_trade_metrics_and_artifacts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fake_mlflow = _FakeMLflow()
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    artifact = tmp_path / "portfolio_recommendations.parquet"
+    artifact.write_text("placeholder", encoding="utf-8")
+
+    mlflow_run_id = log_portfolio_run(
+        PortfolioConfig(optimizer=OptimizerConfig(commission_rate=0.02)),
+        run_id="run-1",
+        data_as_of_date="2026-04-23",
+        recommendations=pd.DataFrame(
+            {
+                "action": ["BUY", "SELL", "HOLD", "EXCLUDE"],
+                "target_weight": [0.2, 0.0, 0.3, 0.0],
+                "current_weight": [0.0, 0.1, 0.301, 0.0],
+                "trade_abs_weight": [0.2, 0.1, 0.001, 0.0],
+                "estimated_commission_weight": [0.004, 0.002, 0.0, 0.0],
+                "cash_required_weight": [0.204, 0.0, 0.0, 0.0],
+                "cash_released_weight": [0.0, 0.098, 0.0, 0.0],
+            }
+        ),
+        risk_metrics=pd.DataFrame(
+            {
+                "metric": ["expected_return", "expected_volatility"],
+                "value": [0.12, 0.2],
+            }
+        ),
+        run_metadata=pd.DataFrame(
+            {
+                "config_hash": ["abc123"],
+                "universe_count": [500],
+                "price_row_count": [1000],
+                "expected_return_is_calibrated": [False],
+            }
+        ),
+        artifacts=[artifact, tmp_path / "missing.parquet"],
+        tracking_uri=str(tmp_path / "mlruns"),
+        experiment_name="portfolio",
+    )
+
+    assert mlflow_run_id == "run-123"
+    assert fake_mlflow.run_name == "portfolio-run-1"
+    assert fake_mlflow.tags["stock_analysis.workflow"] == "one_shot_portfolio"
+    assert fake_mlflow.params["optimizer.commission_rate"] == 0.02
+    assert fake_mlflow.metrics["recommendations.num_buy"] == 1.0
+    assert fake_mlflow.metrics["recommendations.num_sell"] == 1.0
+    assert fake_mlflow.metrics["recommendations.estimated_commission_weight"] == 0.006
+    assert fake_mlflow.metrics["portfolio.expected_return"] == 0.12
+    assert "portfolio_run.json" in fake_mlflow.dict_artifacts
+    assert fake_mlflow.file_artifacts == [str(artifact)]
 
 
 def _result() -> dict[str, object]:

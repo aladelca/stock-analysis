@@ -12,6 +12,7 @@ from stock_analysis.config import (
     OptimizerConfig,
     PanelFeatureConfig,
     PortfolioConfig,
+    PortfolioStateConfig,
     PriceConfig,
     RunConfig,
     TableauConfig,
@@ -45,10 +46,45 @@ def test_one_shot_pipeline_writes_outputs(
     assert (output_root / "gold" / "csv" / "portfolio_recommendations.csv").exists()
 
     recommendations = pd.read_parquet(output_root / "gold" / "portfolio_recommendations.parquet")
+    assert {
+        "current_weight",
+        "trade_weight",
+        "trade_abs_weight",
+        "estimated_commission_weight",
+        "rebalance_required",
+        "action",
+    } <= set(recommendations.columns)
     assert recommendations["target_weight"].sum() == pytest.approx(1.0)
     assert recommendations["target_weight"].min() >= 0
+    assert recommendations["current_weight"].sum() == pytest.approx(0.0)
     assert recommendations["as_of_date"].nunique() == 1
     assert recommendations["as_of_date"].iat[0] == "2026-02-25"
+
+
+def test_one_shot_pipeline_emits_sell_for_current_holding_outside_universe(
+    sample_html,
+    sample_config,
+    static_price_provider,
+    tmp_path: Path,
+) -> None:
+    holdings_path = tmp_path / "current_holdings.csv"
+    holdings_path.write_text("ticker,current_weight\nZZZ,0.10\nAAA,0.20\n", encoding="utf-8")
+    sample_config.portfolio_state = PortfolioStateConfig(current_holdings_path=holdings_path)
+
+    result = run_one_shot(
+        sample_config,
+        universe_html=sample_html,
+        price_provider=static_price_provider,
+    )
+
+    recommendations = pd.read_parquet(
+        Path(result.output_root) / "gold" / "portfolio_recommendations.parquet"
+    )
+    zzz = recommendations.set_index("ticker").loc["ZZZ"]
+    assert zzz["action"] == "SELL"
+    assert zzz["target_weight"] == 0
+    assert zzz["trade_weight"] == pytest.approx(-0.10)
+    assert zzz["estimated_commission_weight"] == pytest.approx(0.002)
 
 
 def test_export_existing_run_for_tableau_does_not_rerun_pipeline(

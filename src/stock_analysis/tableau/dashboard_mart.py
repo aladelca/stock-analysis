@@ -13,9 +13,14 @@ def build_dashboard_mart(
     risk_wide = _risk_metrics_wide(risk_metrics)
     metadata = _single_row_metadata(run_metadata)
 
-    mart["selected"] = mart["action"].astype(str).ne("EXCLUDE")
+    mart["selected"] = pd.to_numeric(mart["target_weight"], errors="coerce").fillna(0.0).gt(0)
     mart["forecast_score"] = mart["expected_return"]
     mart["target_weight_label"] = mart["target_weight"].map(lambda value: f"{float(value):.2%}")
+    mart["current_weight_label"] = mart["current_weight"].map(lambda value: f"{float(value):.2%}")
+    mart["trade_weight_label"] = mart["trade_weight"].map(lambda value: f"{float(value):+.2%}")
+    mart["estimated_commission_weight_label"] = mart["estimated_commission_weight"].map(
+        lambda value: f"{float(value):.2%}"
+    )
     mart["scatter_size"] = mart["target_weight"].where(mart["selected"], 0.001)
 
     for column, metric_value in risk_wide.items():
@@ -37,6 +42,10 @@ def build_dashboard_mart(
 
     sector_weights = sector_exposure.set_index("gics_sector")["target_weight"]
     mart["sector_target_weight"] = mart["gics_sector"].map(sector_weights).fillna(0.0)
+    mart = _coerce_date_columns(
+        mart,
+        ["as_of_date", "run_requested_as_of_date", "run_data_as_of_date"],
+    )
 
     column_order = [
         "run_id",
@@ -46,8 +55,19 @@ def build_dashboard_mart(
         "gics_sector",
         "forecast_score",
         "volatility",
+        "current_weight",
+        "current_weight_label",
         "target_weight",
         "target_weight_label",
+        "trade_weight",
+        "trade_abs_weight",
+        "trade_weight_label",
+        "rebalance_required",
+        "estimated_commission_weight",
+        "estimated_commission_weight_label",
+        "net_trade_weight_after_commission",
+        "cash_required_weight",
+        "cash_released_weight",
         "selected",
         "scatter_size",
         "action",
@@ -70,7 +90,11 @@ def build_dashboard_mart(
     for column in column_order:
         if column not in mart.columns:
             mart[column] = pd.NA
-    return mart[column_order].sort_values("target_weight", ascending=False).reset_index(drop=True)
+    return (
+        mart[column_order]
+        .sort_values(["rebalance_required", "trade_abs_weight", "target_weight"], ascending=False)
+        .reset_index(drop=True)
+    )
 
 
 def _risk_metrics_wide(risk_metrics: pd.DataFrame) -> dict[str, float]:
@@ -99,3 +123,11 @@ def _safe_ratio(numerator: pd.Series | None, denominator: pd.Series | None) -> p
     return pd.to_numeric(numerator, errors="coerce") / numeric_denominator.where(
         numeric_denominator.ne(0)
     )
+
+
+def _coerce_date_columns(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    result = frame.copy()
+    for column in columns:
+        if column in result.columns:
+            result[column] = pd.to_datetime(result[column], errors="coerce").dt.date
+    return result

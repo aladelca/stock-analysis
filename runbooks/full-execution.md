@@ -21,6 +21,7 @@ Required locally:
 Optional:
 
 - Tableau Hyper API and Tableau Server Client via `uv sync --extra tableau --dev`
+- MLflow tracking via `uv sync --extra mlflow --dev`
 
 ## 2. Install Dependencies
 
@@ -34,6 +35,12 @@ If you need Hyper export or Tableau Server publishing:
 
 ```bash
 uv sync --extra tableau --dev
+```
+
+If you want the one-shot run logged to MLflow:
+
+```bash
+uv sync --extra mlflow --dev
 ```
 
 ## 3. Validate The Codebase
@@ -71,8 +78,19 @@ prices:
   lookback_years: 5
 
 optimizer:
-  max_weight: 0.05
+  max_weight: 0.30
   risk_aversion: 10.0
+  commission_rate: 0.02
+  min_rebalance_trade_weight: 0.005
+  sector_max_weight: 0.35
+
+portfolio_state:
+  current_holdings_path: null
+
+mlflow:
+  enabled: true
+  tracking_uri: sqlite:///data/mlflow/mlflow.db
+  experiment_name: stock-analysis-portfolio
 
 tableau:
   export_csv: true
@@ -85,9 +103,48 @@ Notes:
 - `as_of_date: null` means the requested run date is today.
 - Gold `as_of_date` is the latest available price date, not necessarily today.
 - `run_id: null` lets the pipeline generate a UTC run id.
+- `portfolio_state.current_holdings_path: null` means first-allocation mode.
+- `optimizer.commission_rate: 0.02` charges 2% of absolute traded portfolio weight.
+- `mlflow.enabled: true` logs parameters, recommendation metrics, risk metrics, and gold artifacts.
 - Set `tableau.export_hyper: true` only after installing the Tableau extra.
 
-## 5. Run The One-Shot Pipeline
+## 5. Optional Current Holdings Input
+
+If you already have a portfolio, create a holdings file with decimal portfolio weights:
+
+```bash
+cp -f configs/current_holdings.example.csv configs/current_holdings.local.csv
+```
+
+Edit `configs/current_holdings.local.csv`:
+
+```csv
+ticker,current_weight
+AAPL,0.08
+MSFT,0.07
+NVDA,0.05
+```
+
+Then set:
+
+```yaml
+portfolio_state:
+  current_holdings_path: configs/current_holdings.local.csv
+```
+
+Accepted holdings schemas:
+
+```text
+ticker,current_weight
+ticker,weight
+ticker,market_value
+```
+
+If `market_value` is supplied, the pipeline normalizes values into weights. If no holdings file is
+configured, the run answers "how to allocate new money" rather than "what to trade from my current
+book."
+
+## 6. Run The One-Shot Pipeline
 
 The default production config uses the Phase 2 E8 ML forecast engine. To make the
 forecast choice explicit in operator runs:
@@ -115,7 +172,7 @@ Example:
 export RUN_ID="20260424T052554Z"
 ```
 
-## 6. Verify Generated Files
+## 7. Verify Generated Files
 
 Check the run directory:
 
@@ -144,7 +201,20 @@ data/runs/$RUN_ID/gold/run_metadata.parquet
 data/runs/$RUN_ID/gold/csv/portfolio_recommendations.csv
 ```
 
-## 7. Verify Data Date And Run Metadata
+MLflow outputs, when enabled:
+
+```text
+data/mlflow/mlflow.db
+data/mlflow/artifacts/
+```
+
+Start the local MLflow UI:
+
+```bash
+uv run --extra mlflow mlflow ui --backend-store-uri sqlite:///data/mlflow/mlflow.db
+```
+
+## 8. Verify Data Date And Run Metadata
 
 ```bash
 uv run python -c 'import os, pandas as pd
@@ -157,6 +227,9 @@ print(meta[["requested_as_of_date", "data_as_of_date", "as_of_date", "run_id"]].
 print("latest feature date:", features["latest_date"].max())
 print("recommendation as_of_date:", recs["as_of_date"].unique())
 print("weight sum:", recs["target_weight"].sum())
+print("current weight sum:", recs["current_weight"].sum())
+print("trade abs weight:", recs.loc[recs["rebalance_required"], "trade_abs_weight"].sum())
+print("estimated commission:", recs["estimated_commission_weight"].sum())
 print("max weight:", recs["target_weight"].max())
 '
 ```
@@ -166,9 +239,10 @@ Expected:
 - `data_as_of_date` equals the latest available market price date.
 - Recommendation `as_of_date` equals `data_as_of_date`.
 - `target_weight` sums approximately to `1.0`.
+- `estimated_commission_weight` equals `0.02 * trade_abs_weight` for planned BUY/SELL rows.
 - `max weight` is at or below the configured max weight, allowing tiny solver tolerance.
 
-## 8. Inspect Recommendations
+## 9. Inspect Recommendations
 
 Top recommendations:
 
@@ -176,8 +250,18 @@ Top recommendations:
 uv run python -c 'import os, pandas as pd
 run = os.environ["RUN_ID"]
 recs = pd.read_parquet(f"data/runs/{run}/gold/portfolio_recommendations.parquet")
-print(recs[["ticker", "security", "gics_sector", "target_weight", "action", "reason_code"]].head(25).to_string(index=False))
+cols = ["ticker", "security", "gics_sector", "current_weight", "target_weight", "trade_weight", "estimated_commission_weight", "action", "reason_code"]
+print(recs[cols].head(25).to_string(index=False))
 '
+```
+
+Action semantics:
+
+```text
+BUY  = increase the position by trade_weight
+SELL = decrease or exit the position by abs(trade_weight)
+HOLD = current and target weights differ by less than min_rebalance_trade_weight
+EXCLUDE = no current position and no target allocation
 ```
 
 Risk metrics:
@@ -200,7 +284,7 @@ print(sectors.to_string(index=False))
 '
 ```
 
-## 9. Export Tableau Files From Existing Run
+## 10. Export Tableau Files From Existing Run
 
 This step must not re-run ingestion. It reads existing Parquet files for the selected run:
 
@@ -219,7 +303,7 @@ data/runs/$RUN_ID/gold/csv/sector_exposure.csv
 data/runs/$RUN_ID/gold/csv/run_metadata.csv
 ```
 
-## 10. Optional Hyper Export
+## 11. Optional Hyper Export
 
 Enable Hyper export in a local config copy:
 
@@ -259,7 +343,7 @@ Expected Hyper file:
 data/runs/$RUN_ID/gold/tableau_dashboard_mart.hyper
 ```
 
-## 11. Tableau Prep Transformation
+## 12. Tableau Prep Transformation
 
 Open Tableau Prep Builder and create or update the flow described in:
 
@@ -298,7 +382,7 @@ Validation inside Tableau Prep:
 - Selected assets do not exceed configured max weight.
 - `run_id` is consistent across recommendations, risk metrics, sector exposure, and metadata.
 
-## 12. Optional Tableau Server Publish
+## 13. Optional Tableau Server Publish
 
 Install Tableau extras:
 
@@ -364,7 +448,7 @@ ML run outputs:
 uv run stock-analysis publish-tableau tableau_prep_outputs/portfolio_dashboard_mart.hyper --config configs/portfolio.local.yaml
 ```
 
-## 13. Build Tableau Dashboard
+## 14. Build Tableau Dashboard
 
 Generate the starter workbook XML:
 
@@ -396,6 +480,7 @@ Recommended dashboard sheets:
 - KPI Return Vol
 - KPI Weight Sum
 - Holdings by Weight
+- Trade Tickets
 - Sector Allocation
 - Risk Forecast Scatter
 - Freshness Footer
@@ -406,7 +491,7 @@ Publish the workbook after validating it in Tableau Desktop:
 uv run stock-analysis publish-tableau-workbook tableau/workbooks/portfolio_recommendations.twb --config configs/portfolio.local.yaml
 ```
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 If `yfinance` logs failed tickers:
 
@@ -434,7 +519,7 @@ If Tableau publish fails:
 - Confirm the Tableau project exists.
 - Confirm the datasource path exists.
 
-## 15. End Of Session Checks
+## 16. End Of Session Checks
 
 Run final validation:
 

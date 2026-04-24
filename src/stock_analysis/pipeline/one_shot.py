@@ -26,6 +26,7 @@ from stock_analysis.medallion.silver import (
     write_silver_table,
 )
 from stock_analysis.ml.labels import build_forward_return_labels
+from stock_analysis.ml.mlflow_tracking import log_portfolio_run
 from stock_analysis.optimization.engine import optimize_long_only
 from stock_analysis.optimization.recommendations import (
     build_recommendations,
@@ -33,6 +34,7 @@ from stock_analysis.optimization.recommendations import (
     build_sector_exposure,
 )
 from stock_analysis.paths import ProjectPaths
+from stock_analysis.portfolio.holdings import load_current_weights
 from stock_analysis.tableau.dashboard_mart import build_dashboard_mart
 from stock_analysis.tableau.hyper import export_hyper_if_available
 
@@ -158,13 +160,20 @@ def run_one_shot(
     write_csv(optimizer_input, paths.csv_mirror_path("gold", "optimizer_input"))
     covariance.to_parquet(paths.gold_path("covariance_matrix"))
 
-    weights = optimize_long_only(optimizer_input, covariance, config.optimizer)
+    current_weights = load_current_weights(config.portfolio_state.current_holdings_path)
+    weights = optimize_long_only(
+        optimizer_input,
+        covariance,
+        config.optimizer,
+        w_prev=current_weights,
+    )
     recommendations = build_recommendations(
         optimizer_input,
         weights,
         config.optimizer,
         data_as_of_date_str,
         run_id,
+        current_weights=current_weights,
     )
     risk_metrics = build_risk_metrics(
         optimizer_input,
@@ -188,6 +197,19 @@ def run_one_shot(
     _write_gold_with_csv(paths, "sector_exposure", sector_exposure)
     _write_gold_with_csv(paths, "run_metadata", run_metadata)
 
+    artifact_paths = [
+        paths.gold_path("portfolio_recommendations"),
+        paths.csv_mirror_path("gold", "portfolio_recommendations"),
+        paths.gold_path("portfolio_risk_metrics"),
+        paths.csv_mirror_path("gold", "portfolio_risk_metrics"),
+        paths.gold_path("sector_exposure"),
+        paths.csv_mirror_path("gold", "sector_exposure"),
+        paths.gold_path("run_metadata"),
+        paths.csv_mirror_path("gold", "run_metadata"),
+        paths.gold_path("optimizer_input"),
+        paths.gold_path("covariance_matrix"),
+    ]
+
     if config.tableau.export_hyper:
         hyper_path = paths.gold_path("tableau_dashboard_mart", "hyper")
         dashboard_mart = build_dashboard_mart(
@@ -202,6 +224,22 @@ def run_one_shot(
         )
         if exported is None:
             logger.warning("Tableau Hyper API is not installed; skipped Hyper export")
+        else:
+            artifact_paths.append(exported)
+
+    if config.mlflow.enabled:
+        mlflow_run_id = log_portfolio_run(
+            config,
+            run_id=run_id,
+            data_as_of_date=data_as_of_date_str,
+            recommendations=recommendations,
+            risk_metrics=risk_metrics,
+            run_metadata=run_metadata,
+            artifacts=artifact_paths,
+            tracking_uri=config.mlflow.tracking_uri,
+            experiment_name=config.mlflow.experiment_name,
+        )
+        logger.info("Logged one-shot run %s to MLflow run %s", run_id, mlflow_run_id)
 
     logger.info("Completed one-shot run %s", run_id)
     return PipelineResult(
@@ -241,6 +279,14 @@ def _build_run_metadata(
         ),
         "model_family": ("ridge_lightgbm_blend" if config.forecast.engine == "ml" else "heuristic"),
         "expected_return_is_calibrated": False,
+        "commission_rate": config.optimizer.commission_rate,
+        "min_rebalance_trade_weight": config.optimizer.min_rebalance_trade_weight,
+        "sector_max_weight": config.optimizer.sector_max_weight,
+        "current_holdings_path": (
+            str(config.portfolio_state.current_holdings_path)
+            if config.portfolio_state.current_holdings_path is not None
+            else ""
+        ),
         "universe_count": int(len(constituents)),
         "price_row_count": int(len(daily_prices)),
         "created_at_utc": datetime.now(UTC).isoformat(),
