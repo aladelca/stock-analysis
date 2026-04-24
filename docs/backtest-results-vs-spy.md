@@ -2,7 +2,7 @@
 
 ## Summary
 
-The E8 Ridge + LightGBM optimizer was rerun with the production trade-aware cost model:
+The E8 Ridge + LightGBM optimizer was evaluated with the production trade-aware cost model:
 
 ```text
 commission = abs(target_weight - previous_weight) * portfolio_value * 0.02
@@ -16,38 +16,50 @@ recommended buy = 50%
 commission = 0.50 * 1000 * 0.02 = 10
 ```
 
-In portfolio-weight terms, the same trade has:
+In portfolio-weight terms:
 
 ```text
 estimated_commission_weight = 0.50 * 0.02 = 0.01
 ```
 
-This cost applies to both buys and sells because both are transactions. With this assumption, the
-current high-turnover E8 model does **not** beat SPY. The strategy is rejected on point estimates:
-negative return, negative active return, and negative information ratio.
+This cost applies to both buys and sells because both are transactions.
+
+The initial weekly E8 model with `lambda_turnover=0.001` failed under this cost model. I then swept
+larger `lambda_turnover` values so the optimizer could select the best tested turnover penalty by
+SPY-relative information ratio. The best tested value was:
+
+```text
+lambda_turnover = 5.0
+```
+
+That setting reduced mean turnover from `68.24%` to `5.68%` and reduced estimated commission drag
+from `2.73%` to `0.23%` per rebalance. It still did **not** beat SPY, so the strategy remains
+rejected.
 
 ## Test Setup
 
 | Item | Value |
 | --- | --- |
 | Source artifacts | `data/runs/phase2-source-20260424` |
-| Result artifact | `docs/experiments/e8-commission-2pct-20260424.json` |
+| Initial result artifact | `docs/experiments/e8-commission-2pct-20260424.json` |
+| Turnover sweep artifact | `docs/experiments/e8-turnover-sweep-2pct-20260424.json` |
 | Backtest window | 2022-05-23 to 2026-03-23 |
 | Completed rebalance observations | 46 |
 | Rebalance cadence | 5 business days |
 | Forecast horizon | 5 trading days |
 | Transaction cost | 2% of absolute traded notional |
+| Turnover penalty sweep | 0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5 |
+| Sweep objective | Maximize information ratio |
 | Universe | Top 100 assets by latest `dollar_volume_21d` |
 | Portfolio constraints | Long-only, fully invested |
 | Optimizer max weight | 30% |
 | Risk aversion | 10 |
-| Turnover penalty | 0.001 |
 | Benchmark | SPY aligned to the same rebalance dates and horizon |
 
-Command:
+Turnover tuning command:
 
 ```bash
-uv run stock-analysis autoresearch-eval \
+uv run stock-analysis tune-turnover \
   --candidate e8_baseline \
   --input-run-root data/runs/phase2-source-20260424 \
   --max-assets 100 \
@@ -55,14 +67,15 @@ uv run stock-analysis autoresearch-eval \
   --optimizer-max-weight 0.30 \
   --risk-aversion 10 \
   --min-trade-weight 0.005 \
-  --lambda-turnover 0.001 \
   --commission-rate 0.02 \
+  --turnover-penalties 0.001,0.005,0.01,0.02,0.05,0.1,0.2,0.5,1,2,5 \
+  --objective-metric information_ratio \
   --horizon-days 5 \
   --rebalance-step-days 5 \
   --embargo-days 15 \
   --covariance-lookback-days 252 \
-  --iteration-id e8-commission-2pct-20260424 \
-  --json-output docs/experiments/e8-commission-2pct-20260424.json
+  --iteration-id e8-turnover-sweep-2pct-20260424 \
+  --json-output docs/experiments/e8-turnover-sweep-2pct-20260424.json
 ```
 
 ## Results
@@ -70,28 +83,34 @@ uv run stock-analysis autoresearch-eval \
 | Strategy | Cumulative Return | Annualized Return | Annualized Volatility | Sharpe | Max Drawdown | Cumulative Active Return vs SPY | Annualized Active Return vs SPY | Information Ratio |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | SPY buy-and-hold | 15.55% | 17.01% | 15.04% | 1.131 | -11.94% | 0.00% | n/a | n/a |
-| E8 Ridge + LightGBM, 2% commission | -43.39% | -46.12% | 36.51% | -1.263 | -44.44% | -51.00% | -71.73% | -2.539 |
+| E8, 2% commission, `lambda_turnover=0.001` | -43.39% | -46.12% | 36.51% | -1.263 | -44.44% | -51.00% | -71.73% | -2.539 |
+| E8, 2% commission, selected `lambda_turnover=5.0` | 8.80% | 9.60% | 34.66% | 0.277 | -18.86% | -5.85% | -1.85% | -0.067 |
 
-Additional trade-cost diagnostics:
+## Turnover Penalty Sweep
 
-| Metric | Value |
-| --- | ---: |
-| Mean turnover per rebalance | 68.24% |
-| Mean absolute traded weight per rebalance | 136.48% |
-| Approx. commission drag per rebalance | 2.73% |
-| Sharpe difference vs SPY | -2.394 |
-| Sharpe difference 95% bootstrap CI | [-2.349, -0.560] |
-| Decision | rejected |
+| Lambda Turnover | Cumulative Return | Annualized Return | Sharpe | Information Ratio | Mean Turnover | Commission Drag / Rebalance | Max Drawdown |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.001 | -43.39% | -46.12% | -1.263 | -2.539 | 68.24% | 2.73% | -44.44% |
+| 0.005 | -43.36% | -46.09% | -1.262 | -2.537 | 68.14% | 2.73% | -44.42% |
+| 0.010 | -43.33% | -46.06% | -1.260 | -2.533 | 68.02% | 2.72% | -44.38% |
+| 0.020 | -43.27% | -46.00% | -1.258 | -2.527 | 67.77% | 2.71% | -44.32% |
+| 0.050 | -43.09% | -45.81% | -1.249 | -2.509 | 66.98% | 2.68% | -44.15% |
+| 0.100 | -42.81% | -45.52% | -1.239 | -2.489 | 65.60% | 2.62% | -43.87% |
+| 0.200 | -39.46% | -42.05% | -1.153 | -2.307 | 61.09% | 2.44% | -40.69% |
+| 0.500 | -33.84% | -36.18% | -0.997 | -1.999 | 51.37% | 2.05% | -38.19% |
+| 1.000 | -21.99% | -23.66% | -0.609 | -1.218 | 39.70% | 1.59% | -32.66% |
+| 2.000 | 0.58% | 0.63% | 0.015 | -0.232 | 24.50% | 0.98% | -24.06% |
+| 5.000 | 8.80% | 9.60% | 0.277 | -0.067 | 5.68% | 0.23% | -18.86% |
 
-The commission drag is large because turnover is high:
+The selected penalty cuts turnover materially:
 
 ```text
-mean_abs_trade_weight = 2 * mean_turnover = 2 * 0.6824 = 1.3648
-mean_commission_drag = 1.3648 * 0.02 = 0.0273
-```
+initial_abs_trade_weight = 2 * 0.6824 = 1.3648
+initial_commission_drag = 1.3648 * 0.02 = 0.0273
 
-That means the model pays roughly 2.73% of portfolio value in commission every 5-business-day
-rebalance on average. This overwhelms the forecast edge in the current E8 configuration.
+selected_abs_trade_weight = 2 * 0.0568 = 0.1136
+selected_commission_drag = 0.1136 * 0.02 = 0.0023
+```
 
 ## Comparison To Previous 5 bps Baseline
 
@@ -105,7 +124,7 @@ that assumption, E8 had a strong point estimate:
 That result is no longer the relevant production result if the intended commission is 2% of traded
 notional. The 2% assumption changes the optimizer/backtest economics materially.
 
-## Optimization Model In This Run
+## Optimization Model In The Selected Run
 
 The objective was:
 
@@ -124,11 +143,11 @@ w_i >= 0
 w_i <= max_weight
 ```
 
-Parameters:
+Selected parameters:
 
 ```text
 gamma = 10
-lambda_turnover = 0.001
+lambda_turnover = 5.0
 commission_rate = 0.02
 max_weight = 0.30
 ```
@@ -166,12 +185,13 @@ The correct interpretation is:
 
 ```text
 No obvious target leakage in the walk-forward prediction loop.
-The E8 model is not viable under a 2% commission-on-traded-notional assumption.
-The primary failure mode is excessive turnover relative to transaction cost.
+A larger turnover penalty materially improves the strategy under 2% commission.
+The selected weekly E8 strategy still does not beat SPY.
 ```
 
-This does not prove the forecast model has no signal. It proves that the current optimizer settings
-and rebalance cadence are not compatible with a 2% commission assumption.
+This does not prove the forecast model has no signal. It proves that the weekly rebalance strategy
+is not strong enough after a realistic turnover penalty is selected under a 2% commission
+assumption.
 
 ## Limitations
 
@@ -185,8 +205,8 @@ and rebalance cadence are not compatible with a 2% commission assumption.
 
 ## Recommended Next Steps
 
-1. Increase the turnover penalty substantially and rerun the same SPY-relative backtest.
-2. Test a longer rebalance cadence, such as 21 trading days, to reduce transaction frequency.
-3. Add a no-trade band so small signal changes do not trigger expensive rebalances.
-4. Lower max single-name weight and add sector caps for a more realistic production portfolio.
+1. Test a longer rebalance cadence, such as 21 trading days, to reduce transaction frequency.
+2. Add a no-trade band so small signal changes do not trigger expensive rebalances.
+3. Lower max single-name weight and add sector caps for a more realistic production portfolio.
+4. Sweep `lambda_turnover` beyond `5.0` only if paired with lower rebalance frequency.
 5. Replace current-constituent membership and latest-liquidity selection with point-in-time inputs.

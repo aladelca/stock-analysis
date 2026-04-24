@@ -319,6 +319,8 @@ Interpretation:
 - `lambda_turnover` discourages unnecessary rebalance churn.
 - `commission_rate` models direct transaction cost. The default production assumption is `0.02`,
   meaning 2% of the absolute traded notional.
+- The current production config uses `lambda_turnover = 5.0`, selected from a turnover-penalty
+  sweep under the 2% commission model.
 - Larger `gamma` produces a more risk-averse allocation.
 - Smaller `gamma` allows more concentration in high-score assets, subject to constraints.
 

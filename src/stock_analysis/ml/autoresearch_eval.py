@@ -3,7 +3,8 @@ from __future__ import annotations
 import csv
 import json
 import subprocess
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -75,7 +76,7 @@ class AutoresearchEvalConfig:
     optimizer_max_weight: float = 0.30
     risk_aversion: float = 10.0
     min_trade_weight: float = 0.005
-    lambda_turnover: float = 0.001
+    lambda_turnover: float = 5.0
     commission_rate: float = 0.02
     horizon_days: int | None = None
     rebalance_step_days: int = 5
@@ -84,6 +85,13 @@ class AutoresearchEvalConfig:
     covariance_lookback_days: int = 252
     liquidity_column: str = "dollar_volume_21d"
     iteration_id: str | None = None
+
+
+@dataclass(frozen=True)
+class TurnoverSweepConfig:
+    base: AutoresearchEvalConfig
+    penalties: tuple[float, ...]
+    objective_metric: str = "information_ratio"
 
 
 def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
@@ -160,6 +168,74 @@ def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
         "baseline": BASELINE_METRICS,
         "decision": decision,
     }
+
+
+def evaluate_turnover_sweep(config: TurnoverSweepConfig) -> dict[str, Any]:
+    if not config.penalties:
+        msg = "turnover sweep requires at least one lambda_turnover value"
+        raise ValueError(msg)
+
+    rows: list[dict[str, object]] = []
+    details: dict[str, dict[str, Any]] = {}
+    base_iteration_id = config.base.iteration_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    for penalty in config.penalties:
+        iteration_id = f"{base_iteration_id}-lambda-{_slug_number(penalty)}"
+        result = evaluate_candidate(
+            replace(config.base, lambda_turnover=penalty, iteration_id=iteration_id)
+        )
+        row = _turnover_sweep_row(result, penalty, config.base.commission_rate)
+        rows.append(row)
+        details[str(penalty)] = result
+
+    summary = pd.DataFrame(rows)
+    best = select_best_turnover_row(summary, config.objective_metric)
+    payload = {
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        "objective_metric": config.objective_metric,
+        "best": best,
+        "summary": [_json_record(row) for row in summary.to_dict(orient="records")],
+        "config": {
+            "candidate_id": config.base.candidate_id,
+            "input_run_root": str(config.base.input_run_root),
+            "max_assets": config.base.max_assets,
+            "max_rebalances": config.base.max_rebalances,
+            "commission_rate": config.base.commission_rate,
+            "penalties": list(config.penalties),
+        },
+        "details": details,
+    }
+    return payload
+
+
+def select_best_turnover_row(summary: pd.DataFrame, objective_metric: str) -> dict[str, object]:
+    if objective_metric not in summary.columns:
+        msg = f"objective metric is not available in turnover sweep: {objective_metric}"
+        raise ValueError(msg)
+    ranked = summary.copy()
+    ranked["_objective"] = pd.to_numeric(ranked[objective_metric], errors="coerce")
+    ranked = ranked.loc[ranked["_objective"].notna()].copy()
+    if ranked.empty:
+        msg = f"turnover sweep produced no finite values for objective: {objective_metric}"
+        raise ValueError(msg)
+    ranked["_annualized_return"] = pd.to_numeric(
+        _sweep_column(ranked, "annualized_return"), errors="coerce"
+    ).fillna(-np.inf)
+    ranked["_sharpe"] = pd.to_numeric(
+        _sweep_column(ranked, "candidate_sharpe"), errors="coerce"
+    ).fillna(-np.inf)
+    ranked["_mean_turnover"] = pd.to_numeric(
+        _sweep_column(ranked, "mean_turnover"), errors="coerce"
+    ).fillna(np.inf)
+    best = ranked.sort_values(
+        ["_objective", "_annualized_return", "_sharpe", "_mean_turnover"],
+        ascending=[False, False, False, True],
+    ).iloc[0]
+    return _json_record(
+        best.drop(
+            labels=["_objective", "_annualized_return", "_sharpe", "_mean_turnover"],
+            errors="ignore",
+        ).to_dict()
+    )
 
 
 def decide_candidate(metrics: dict[str, float | None]) -> dict[str, Any]:
@@ -384,6 +460,66 @@ def _comparison_metrics(
     }
 
 
+def _turnover_sweep_row(
+    result: dict[str, Any],
+    penalty: float,
+    commission_rate: float,
+) -> dict[str, object]:
+    comparison = result.get("metrics", {}).get("comparison", {})
+    portfolio = result.get("metrics", {}).get("portfolio", {})
+    decision = result.get("decision", {})
+    observations = _finite_or_none(comparison.get("ir_observations"))
+    annualized_return = _finite_or_none(comparison.get("annualized_return"))
+    rebalance_step_days = result.get("config", {}).get("rebalance_step_days", 5)
+    periods_per_year = max(1, round(252 / max(float(rebalance_step_days), 1)))
+    mean_turnover = _finite_or_none(comparison.get("mean_turnover"))
+    mean_abs_trade_weight = None if mean_turnover is None else 2 * mean_turnover
+    commission_drag = (
+        None if mean_abs_trade_weight is None else mean_abs_trade_weight * commission_rate
+    )
+    return {
+        "lambda_turnover": penalty,
+        "status": decision.get("status", ""),
+        "annualized_return": annualized_return,
+        "cumulative_return": _cumulative_from_annualized(
+            annualized_return,
+            observations,
+            periods_per_year,
+        ),
+        "annualized_volatility": _finite_or_none(portfolio.get("annualized_volatility")),
+        "candidate_sharpe": _finite_or_none(comparison.get("candidate_sharpe")),
+        "spy_sharpe": _finite_or_none(comparison.get("spy_sharpe")),
+        "sharpe_diff": _finite_or_none(comparison.get("sharpe_diff")),
+        "sharpe_diff_ci_low": _finite_or_none(comparison.get("sharpe_diff_ci_low")),
+        "sharpe_diff_ci_high": _finite_or_none(comparison.get("sharpe_diff_ci_high")),
+        "max_drawdown": _finite_or_none(comparison.get("max_drawdown")),
+        "active_return": _finite_or_none(comparison.get("active_return")),
+        "tracking_error": _finite_or_none(comparison.get("tracking_error")),
+        "information_ratio": _finite_or_none(comparison.get("information_ratio")),
+        "mean_turnover": mean_turnover,
+        "mean_abs_trade_weight": mean_abs_trade_weight,
+        "commission_drag_per_rebalance": commission_drag,
+        "ir_observations": observations,
+        "notes": decision.get("notes", ""),
+    }
+
+
+def _cumulative_from_annualized(
+    annualized_return: float | None,
+    observations: float | None,
+    periods_per_year: int,
+) -> float | None:
+    if annualized_return is None or observations is None:
+        return None
+    return float((1 + annualized_return) ** (observations / periods_per_year) - 1)
+
+
+def _sweep_column(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series(np.nan, index=frame.index)
+    return frame[column]
+
+
 def _failed_result(
     config: AutoresearchEvalConfig,
     candidate_description: str,
@@ -427,7 +563,7 @@ def _config_payload(config: AutoresearchEvalConfig, horizon_days: int) -> dict[s
     }
 
 
-def _finite_or_none(value: float | int | None) -> float | None:
+def _finite_or_none(value: Any) -> float | None:
     if value is None:
         return None
     result = float(value)
@@ -463,3 +599,25 @@ def _git_commit() -> str:
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
     return result.stdout.strip()
+
+
+def _slug_number(value: float) -> str:
+    return f"{value:g}".replace(".", "p").replace("-", "m")
+
+
+def _json_record(record: Mapping[Any, Any]) -> dict[str, object]:
+    return {str(key): _json_value(value) for key, value in record.items()}
+
+
+def _json_value(value: Any) -> object:
+    if value is None:
+        return None
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        value = float(value)
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, bool | int | str):
+        return value
+    return str(value)

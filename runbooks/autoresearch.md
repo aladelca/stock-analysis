@@ -30,6 +30,30 @@ uv run python scripts/autoresearch_eval.py \
 The command prints JSON and optionally appends one row to the TSV ledger. A rejected candidate is a
 valid evaluator outcome and still exits successfully.
 
+## Turnover Penalty Tuning
+
+When commission is large, tune `lambda_turnover` instead of guessing a single penalty. The tuning
+command retrains the candidate for each penalty, backtests it, and selects the best value by the
+configured objective metric. The default objective is SPY-relative `information_ratio`.
+
+```bash
+uv run stock-analysis tune-turnover \
+  --candidate e8_baseline \
+  --input-run-root data/runs/phase2-source-20260424 \
+  --max-assets 100 \
+  --max-rebalances 48 \
+  --optimizer-max-weight 0.30 \
+  --commission-rate 0.02 \
+  --turnover-penalties 0.001,0.005,0.01,0.02,0.05,0.1,0.2,0.5,1,2,5 \
+  --objective-metric information_ratio \
+  --json-output docs/experiments/e8-turnover-sweep-2pct-20260424.json
+```
+
+Read `best.lambda_turnover` from the output and copy it into `configs/portfolio.yaml` only after
+reviewing the full sweep table. In the current 2% commission sweep, the best tested value is `5.0`.
+If all rows remain rejected, treat the result as evidence that the current model/cadence is not
+viable under the configured commission, not as a production promotion.
+
 ## MLflow Tracking
 
 MLflow logging is opt-in:

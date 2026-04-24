@@ -322,7 +322,7 @@ forecast:
 
 optimizer:
   max_weight: 0.30
-  lambda_turnover: 0.001
+  lambda_turnover: 5.0
 
 tableau:
   export_csv: true
@@ -422,7 +422,7 @@ forecast:
 
 optimizer:
   max_weight: 0.30
-  lambda_turnover: 0.001
+  lambda_turnover: 5.0
 
 tableau:
   export_csv: true

@@ -95,7 +95,7 @@ class OptimizerConfig(BaseModel):
     risk_aversion: float = Field(default=10.0, ge=0)
     min_trade_weight: float = Field(default=0.005, ge=0)
     min_rebalance_trade_weight: float = Field(default=0.005, ge=0)
-    lambda_turnover: float = Field(default=0.001, ge=0)
+    lambda_turnover: float = Field(default=5.0, ge=0)
     commission_rate: float = Field(default=0.02, ge=0, le=1)
     sector_max_weight: float | None = Field(default=None, gt=0, le=1)
     solver: str | None = None

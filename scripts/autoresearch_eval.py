@@ -32,7 +32,7 @@ def main() -> int:
     parser.add_argument("--optimizer-max-weight", type=float, default=0.30)
     parser.add_argument("--risk-aversion", type=float, default=10.0)
     parser.add_argument("--min-trade-weight", type=float, default=0.005)
-    parser.add_argument("--lambda-turnover", type=float, default=0.001)
+    parser.add_argument("--lambda-turnover", type=float, default=5.0)
     parser.add_argument(
         "--commission-rate",
         type=float,

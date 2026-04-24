@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 
+import pandas as pd
 import pytest
 
 from stock_analysis.ml.autoresearch_eval import (
@@ -9,6 +10,7 @@ from stock_analysis.ml.autoresearch_eval import (
     append_result_tsv,
     decide_candidate,
     result_to_tsv_row,
+    select_best_turnover_row,
 )
 
 
@@ -123,6 +125,23 @@ def test_result_to_tsv_row_uses_stable_columns() -> None:
     assert row["candidate_id"] == "candidate"
     assert row["commission_rate"] == 0.02
     assert row["information_ratio"] == 2.0
+
+
+def test_select_best_turnover_row_prefers_objective_then_lower_turnover() -> None:
+    summary = pd.DataFrame(
+        {
+            "lambda_turnover": [0.01, 0.1, 1.0],
+            "information_ratio": [0.5, 0.7, 0.7],
+            "annualized_return": [0.10, 0.08, 0.08],
+            "candidate_sharpe": [1.0, 1.1, 1.1],
+            "mean_turnover": [0.6, 0.3, 0.2],
+        }
+    )
+
+    best = select_best_turnover_row(summary, "information_ratio")
+
+    assert best["lambda_turnover"] == 1.0
+    assert best["information_ratio"] == 0.7
 
 
 def test_append_result_tsv_writes_header_and_row(tmp_path) -> None:

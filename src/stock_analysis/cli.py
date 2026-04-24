@@ -13,8 +13,10 @@ from stock_analysis.env import load_local_env
 from stock_analysis.logging import configure_logging
 from stock_analysis.ml.autoresearch_eval import (
     AutoresearchEvalConfig,
+    TurnoverSweepConfig,
     append_result_tsv,
     evaluate_candidate,
+    evaluate_turnover_sweep,
     result_to_json,
 )
 from stock_analysis.ml.experiments import run_experiment_from_config
@@ -120,6 +122,16 @@ AUTORESEARCH_MLFLOW_EXPERIMENT_NAME_OPTION = typer.Option(
     "--mlflow-experiment-name",
     help="MLflow experiment name used when --mlflow is set.",
 )
+TURNOVER_PENALTIES_OPTION = typer.Option(
+    "0.001,0.005,0.01,0.02,0.05,0.1,0.2,0.5,1,2,5",
+    "--turnover-penalties",
+    help="Comma-separated lambda_turnover values to sweep.",
+)
+TURNOVER_OBJECTIVE_OPTION = typer.Option(
+    "information_ratio",
+    "--objective-metric",
+    help="Summary metric used to select the best turnover penalty.",
+)
 
 
 @app.command("run-one-shot")
@@ -194,7 +206,7 @@ def autoresearch_eval_command(
     optimizer_max_weight: float = typer.Option(0.30, "--optimizer-max-weight"),
     risk_aversion: float = typer.Option(10.0, "--risk-aversion"),
     min_trade_weight: float = typer.Option(0.005, "--min-trade-weight"),
-    lambda_turnover: float = typer.Option(0.001, "--lambda-turnover"),
+    lambda_turnover: float = typer.Option(5.0, "--lambda-turnover"),
     commission_rate: float = typer.Option(
         0.02,
         "--commission-rate",
@@ -253,6 +265,63 @@ def autoresearch_eval_command(
             "run_id": run_id,
             "tracking_uri": mlflow_tracking_uri or DEFAULT_MLFLOW_TRACKING_URI,
         }
+    output = result_to_json(result)
+    if json_output is not None:
+        json_output.parent.mkdir(parents=True, exist_ok=True)
+        json_output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+
+
+@app.command("tune-turnover")
+def tune_turnover_command(
+    candidate: str = AUTORESEARCH_CANDIDATE_OPTION,
+    input_run_root: Path = AUTORESEARCH_INPUT_RUN_ROOT_OPTION,
+    max_assets: int | None = AUTORESEARCH_MAX_ASSETS_OPTION,
+    max_rebalances: int | None = AUTORESEARCH_MAX_REBALANCES_OPTION,
+    optimizer_max_weight: float = typer.Option(0.30, "--optimizer-max-weight"),
+    risk_aversion: float = typer.Option(10.0, "--risk-aversion"),
+    min_trade_weight: float = typer.Option(0.005, "--min-trade-weight"),
+    commission_rate: float = typer.Option(
+        0.02,
+        "--commission-rate",
+        help="Commission rate applied to absolute traded notional. Example: 0.02 means 2%.",
+    ),
+    turnover_penalties: str = TURNOVER_PENALTIES_OPTION,
+    objective_metric: str = TURNOVER_OBJECTIVE_OPTION,
+    horizon_days: int | None = typer.Option(None, "--horizon-days"),
+    rebalance_step_days: int = typer.Option(5, "--rebalance-step-days"),
+    embargo_days: int = typer.Option(15, "--embargo-days"),
+    cost_bps: float = typer.Option(5.0, "--cost-bps"),
+    covariance_lookback_days: int = typer.Option(252, "--covariance-lookback-days"),
+    liquidity_column: str = typer.Option("dollar_volume_21d", "--liquidity-column"),
+    iteration_id: str | None = typer.Option(None, "--iteration-id"),
+    json_output: Path | None = AUTORESEARCH_JSON_OUTPUT_OPTION,
+) -> None:
+    configure_logging()
+    penalties = _parse_float_list(turnover_penalties)
+    result = evaluate_turnover_sweep(
+        TurnoverSweepConfig(
+            base=AutoresearchEvalConfig(
+                candidate_id=candidate,
+                input_run_root=input_run_root,
+                max_assets=max_assets,
+                max_rebalances=max_rebalances,
+                optimizer_max_weight=optimizer_max_weight,
+                risk_aversion=risk_aversion,
+                min_trade_weight=min_trade_weight,
+                commission_rate=commission_rate,
+                horizon_days=horizon_days,
+                rebalance_step_days=rebalance_step_days,
+                embargo_days=embargo_days,
+                cost_bps=cost_bps,
+                covariance_lookback_days=covariance_lookback_days,
+                liquidity_column=liquidity_column,
+                iteration_id=iteration_id,
+            ),
+            penalties=penalties,
+            objective_metric=objective_metric,
+        )
+    )
     output = result_to_json(result)
     if json_output is not None:
         json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -330,3 +399,20 @@ def publish_tableau_workbook_command(
         print("[yellow]Tableau publishing is disabled.[/yellow]")
     else:
         print(f"[green]Published Tableau workbook[/green] {published_id}")
+
+
+def _parse_float_list(raw: str) -> tuple[float, ...]:
+    values: list[float] = []
+    for item in raw.split(","):
+        stripped = item.strip()
+        if not stripped:
+            continue
+        try:
+            values.append(float(stripped))
+        except ValueError as exc:
+            print(f"[red]Invalid float in comma-separated list: {stripped}[/red]")
+            raise typer.Exit(2) from exc
+    if not values:
+        print("[red]Provide at least one numeric value.[/red]")
+        raise typer.Exit(2)
+    return tuple(values)
