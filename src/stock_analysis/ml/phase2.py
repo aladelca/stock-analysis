@@ -64,6 +64,21 @@ LIGHTGBM_PARAM_GRID: tuple[dict[str, Any], ...] = (
     },
 )
 
+CATBOOST_PARAM_GRID: tuple[dict[str, Any], ...] = (
+    {
+        "iterations": 120,
+        "learning_rate": 0.05,
+        "depth": 4,
+        "l2_leaf_reg": 3.0,
+    },
+    {
+        "iterations": 180,
+        "learning_rate": 0.03,
+        "depth": 5,
+        "l2_leaf_reg": 5.0,
+    },
+)
+
 
 class ForecastModel(Protocol):
     def predict(self, features: pd.DataFrame) -> Sequence[float]:
@@ -317,6 +332,147 @@ class LightGBMForecastModel:
         if self.task == "rank":
             return lgb.LGBMRanker(objective="lambdarank", **common)
         return lgb.LGBMRegressor(objective="regression", **common)
+
+
+class CatBoostForecastModel:
+    def __init__(
+        self,
+        train_df: pd.DataFrame,
+        *,
+        feature_columns: tuple[str, ...],
+        target_column: str,
+        task: Literal["regression", "classification"],
+        score_column: str,
+        random_seed: int,
+        params: dict[str, Any] | None = None,
+        nested_cv: bool = False,
+        inner_folds: int = 2,
+    ) -> None:
+        self.feature_columns = feature_columns
+        self.target_column = target_column
+        self.task = task
+        self.score_column = score_column
+        self.random_seed = random_seed
+        self.medians: pd.Series | None = None
+        self.constant_prediction: float | None = None
+        self.model: Any | None = None
+        self.params = (
+            params
+            if params is not None
+            else (
+                self._select_params(train_df, inner_folds) if nested_cv else CATBOOST_PARAM_GRID[0]
+            )
+        )
+        self._fit(train_df, self.params)
+
+    def predict(self, features: pd.DataFrame) -> list[float]:
+        x = self._transform_features(features, fit=False)
+        if self.constant_prediction is not None:
+            return [self.constant_prediction] * len(x)
+        if self.model is None:
+            msg = "CatBoost model has not been fit"
+            raise ValueError(msg)
+        if self.task == "classification":
+            probabilities = self.model.predict_proba(x)[:, 1]
+            return np.asarray(probabilities, dtype=float).tolist()
+        return np.asarray(self.model.predict(x), dtype=float).tolist()
+
+    def _fit(self, train_df: pd.DataFrame, params: dict[str, Any]) -> None:
+        frame = train_df.copy()
+        target = self._target(frame)
+        valid = target.notna()
+        if not valid.any():
+            self.constant_prediction = 0.0
+            return
+        frame = frame.loc[valid].copy()
+        target = target.loc[valid]
+        frame["_target"] = target.to_numpy()
+        frame = frame.sort_values(["date", "ticker"]).reset_index(drop=True)
+        target = frame.pop("_target")
+        x = self._transform_features(frame, fit=True)
+        y = self._coerce_target(target)
+        if self.task == "classification" and len(set(y.tolist())) < 2:
+            self.constant_prediction = float(np.mean(y))
+            return
+        self.model = self._make_estimator(params)
+        self.model.fit(x, y, verbose=False)
+
+    def _select_params(self, train_df: pd.DataFrame, inner_folds: int) -> dict[str, Any]:
+        dates = pd.DatetimeIndex(pd.to_datetime(train_df["date"]).dropna().unique()).sort_values()
+        if len(dates) < 80:
+            return CATBOOST_PARAM_GRID[0]
+        folds = _inner_cv_date_folds(dates, max_folds=inner_folds)
+        if not folds:
+            return CATBOOST_PARAM_GRID[0]
+
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for params in CATBOOST_PARAM_GRID:
+            fold_scores: list[float] = []
+            for train_dates, val_dates in folds:
+                inner_train = train_df.loc[pd.to_datetime(train_df["date"]).isin(train_dates)]
+                inner_val = train_df.loc[pd.to_datetime(train_df["date"]).isin(val_dates)]
+                if inner_train.empty or inner_val.empty:
+                    continue
+                candidate = CatBoostForecastModel(
+                    inner_train,
+                    feature_columns=self.feature_columns,
+                    target_column=self.target_column,
+                    task=self.task,
+                    score_column=self.score_column,
+                    random_seed=self.random_seed,
+                    params=params,
+                    nested_cv=False,
+                    inner_folds=0,
+                )
+                score = _rank_ic(
+                    candidate.predict(inner_val),
+                    pd.to_numeric(inner_val[self.score_column], errors="coerce"),
+                )
+                if np.isfinite(score):
+                    fold_scores.append(score)
+            if fold_scores:
+                scored.append((float(np.mean(fold_scores)), params))
+        if not scored:
+            return CATBOOST_PARAM_GRID[0]
+        return sorted(scored, key=lambda item: item[0], reverse=True)[0][1]
+
+    def _transform_features(self, frame: pd.DataFrame, *, fit: bool) -> pd.DataFrame:
+        missing = [column for column in self.feature_columns if column not in frame.columns]
+        if missing:
+            msg = f"missing CatBoost feature columns: {missing}"
+            raise ValueError(msg)
+        x = frame.loc[:, list(self.feature_columns)].apply(pd.to_numeric, errors="coerce")
+        if fit:
+            self.medians = x.median().fillna(0)
+        if self.medians is None:
+            msg = "CatBoost preprocessing medians are unavailable"
+            raise ValueError(msg)
+        return x.fillna(self.medians)
+
+    def _target(self, frame: pd.DataFrame) -> pd.Series:
+        if self.target_column not in frame.columns:
+            msg = f"missing CatBoost target column: {self.target_column}"
+            raise ValueError(msg)
+        return pd.to_numeric(frame[self.target_column], errors="coerce")
+
+    def _coerce_target(self, target: pd.Series) -> np.ndarray:
+        if self.task == "classification":
+            return target.fillna(0).astype(int).to_numpy()
+        return target.to_numpy(dtype=float)
+
+    def _make_estimator(self, params: dict[str, Any]) -> Any:
+        import catboost as cb
+
+        common = {
+            **params,
+            "random_seed": self.random_seed,
+            "allow_writing_files": False,
+            "thread_count": 1,
+            "verbose": False,
+        }
+        if self.task == "classification":
+            return cb.CatBoostClassifier(loss_function="Logloss", **common)
+        return cb.CatBoostRegressor(loss_function="RMSE", **common)
 
 
 class BlendedForecastModel:

@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import numpy as np
 import pandas as pd
 
 from stock_analysis.ml.phase2 import (
+    CATBOOST_PARAM_GRID,
     DEFAULT_FEATURE_CANDIDATES,
     BlendedForecastModel,
+    CatBoostForecastModel,
     LightGBMForecastModel,
     RidgeForecastModel,
 )
@@ -21,7 +23,18 @@ class CandidateModel(Protocol):
 
 
 ScoreTransform = Callable[[np.ndarray], np.ndarray]
-ModelKind = Literal["ridge", "ridge_rank", "lightgbm_regression", "lightgbm_rank", "e8_blend"]
+ModelKind = Literal[
+    "ridge",
+    "ridge_rank",
+    "lightgbm_regression",
+    "lightgbm_rank",
+    "catboost_regression",
+    "catboost_classification",
+    "e8_blend",
+    "weighted_e8_blend",
+    "ridge_catboost_blend",
+    "weighted_e8_catboost_blend",
+]
 
 
 @dataclass(frozen=True)
@@ -35,6 +48,10 @@ class CandidateSpec:
     random_seed: int = 42
     lightgbm_nested_cv: bool = False
     lightgbm_inner_folds: int = 2
+    ridge_weight: float = 1.0
+    lightgbm_weight: float = 1.0
+    catboost_weight: float = 1.0
+    catboost_params: dict[str, Any] | None = None
     score_transform: ScoreTransform = lambda values: values
 
 
@@ -50,6 +67,143 @@ class TransformedCandidateModel:
             msg = "candidate score transform changed the number of predictions"
             raise ValueError(msg)
         return np.asarray(transformed, dtype=float).tolist()
+
+
+class WeightedBlendedCandidateModel:
+    def __init__(
+        self,
+        train_df: pd.DataFrame,
+        *,
+        feature_columns: tuple[str, ...],
+        return_target_column: str,
+        random_seed: int,
+        nested_cv: bool,
+        inner_folds: int,
+        ridge_weight: float,
+        lightgbm_weight: float,
+    ) -> None:
+        self.ridge_model = RidgeForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=return_target_column,
+        )
+        self.lightgbm_model = LightGBMForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=return_target_column,
+            task="regression",
+            score_column=return_target_column,
+            random_seed=random_seed,
+            nested_cv=nested_cv,
+            inner_folds=inner_folds,
+        )
+        self.ridge_weight = ridge_weight
+        self.lightgbm_weight = lightgbm_weight
+
+    def predict(self, features: pd.DataFrame) -> list[float]:
+        ridge_scores = zscore_scores(np.asarray(self.ridge_model.predict(features), dtype=float))
+        lightgbm_scores = zscore_scores(
+            np.asarray(self.lightgbm_model.predict(features), dtype=float)
+        )
+        blended = self.ridge_weight * ridge_scores + self.lightgbm_weight * lightgbm_scores
+        return blended.astype(float).tolist()
+
+
+class WeightedRidgeCatBoostCandidateModel:
+    def __init__(
+        self,
+        train_df: pd.DataFrame,
+        *,
+        feature_columns: tuple[str, ...],
+        return_target_column: str,
+        random_seed: int,
+        ridge_weight: float,
+        catboost_weight: float,
+        catboost_params: dict[str, Any] | None,
+    ) -> None:
+        self.ridge_model = RidgeForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=return_target_column,
+        )
+        self.catboost_model = CatBoostForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=return_target_column,
+            task="regression",
+            score_column=return_target_column,
+            random_seed=random_seed,
+            params=catboost_params,
+        )
+        self.ridge_weight = ridge_weight
+        self.catboost_weight = catboost_weight
+
+    def predict(self, features: pd.DataFrame) -> list[float]:
+        ridge_scores = zscore_scores(np.asarray(self.ridge_model.predict(features), dtype=float))
+        catboost_scores = zscore_scores(
+            np.asarray(self.catboost_model.predict(features), dtype=float)
+        )
+        blended = self.ridge_weight * ridge_scores + self.catboost_weight * catboost_scores
+        return blended.astype(float).tolist()
+
+
+class WeightedRidgeLightGBMCatBoostCandidateModel:
+    def __init__(
+        self,
+        train_df: pd.DataFrame,
+        *,
+        feature_columns: tuple[str, ...],
+        return_target_column: str,
+        random_seed: int,
+        nested_cv: bool,
+        inner_folds: int,
+        ridge_weight: float,
+        lightgbm_weight: float,
+        catboost_weight: float,
+        catboost_params: dict[str, Any] | None,
+    ) -> None:
+        self.ridge_model = RidgeForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=return_target_column,
+        )
+        self.lightgbm_model = LightGBMForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=return_target_column,
+            task="regression",
+            score_column=return_target_column,
+            random_seed=random_seed,
+            nested_cv=nested_cv,
+            inner_folds=inner_folds,
+        )
+        self.catboost_model = CatBoostForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=return_target_column,
+            task="regression",
+            score_column=return_target_column,
+            random_seed=random_seed,
+            params=catboost_params,
+        )
+        self.ridge_weight = ridge_weight
+        self.lightgbm_weight = lightgbm_weight
+        self.catboost_weight = catboost_weight
+
+    def predict(self, features: pd.DataFrame) -> list[float]:
+        ridge_scores = zscore_scores(np.asarray(self.ridge_model.predict(features), dtype=float))
+        lightgbm_scores = zscore_scores(
+            np.asarray(self.lightgbm_model.predict(features), dtype=float)
+        )
+        catboost_scores = zscore_scores(
+            np.asarray(self.catboost_model.predict(features), dtype=float)
+        )
+        blended = (
+            self.ridge_weight * ridge_scores
+            + self.lightgbm_weight * lightgbm_scores
+            + self.catboost_weight * catboost_scores
+        )
+        return blended.astype(float).tolist()
 
 
 def candidate_ids() -> tuple[str, ...]:
@@ -131,6 +285,26 @@ def _build_model(
             nested_cv=candidate.lightgbm_nested_cv,
             inner_folds=candidate.lightgbm_inner_folds,
         )
+    if candidate.model_kind == "catboost_regression":
+        return CatBoostForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=target_column,
+            task="regression",
+            score_column=target_column,
+            random_seed=candidate.random_seed,
+            params=candidate.catboost_params,
+        )
+    if candidate.model_kind == "catboost_classification":
+        return CatBoostForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=target_column,
+            task="classification",
+            score_column=f"fwd_return_{candidate.horizon_days}d",
+            random_seed=candidate.random_seed,
+            params=candidate.catboost_params,
+        )
     if candidate.model_kind == "e8_blend":
         return BlendedForecastModel(
             train_df,
@@ -139,6 +313,40 @@ def _build_model(
             random_seed=candidate.random_seed,
             nested_cv=candidate.lightgbm_nested_cv,
             inner_folds=candidate.lightgbm_inner_folds,
+        )
+    if candidate.model_kind == "weighted_e8_blend":
+        return WeightedBlendedCandidateModel(
+            train_df,
+            feature_columns=feature_columns,
+            return_target_column=target_column,
+            random_seed=candidate.random_seed,
+            nested_cv=candidate.lightgbm_nested_cv,
+            inner_folds=candidate.lightgbm_inner_folds,
+            ridge_weight=candidate.ridge_weight,
+            lightgbm_weight=candidate.lightgbm_weight,
+        )
+    if candidate.model_kind == "ridge_catboost_blend":
+        return WeightedRidgeCatBoostCandidateModel(
+            train_df,
+            feature_columns=feature_columns,
+            return_target_column=target_column,
+            random_seed=candidate.random_seed,
+            ridge_weight=candidate.ridge_weight,
+            catboost_weight=candidate.catboost_weight,
+            catboost_params=candidate.catboost_params,
+        )
+    if candidate.model_kind == "weighted_e8_catboost_blend":
+        return WeightedRidgeLightGBMCatBoostCandidateModel(
+            train_df,
+            feature_columns=feature_columns,
+            return_target_column=target_column,
+            random_seed=candidate.random_seed,
+            nested_cv=candidate.lightgbm_nested_cv,
+            inner_folds=candidate.lightgbm_inner_folds,
+            ridge_weight=candidate.ridge_weight,
+            lightgbm_weight=candidate.lightgbm_weight,
+            catboost_weight=candidate.catboost_weight,
+            catboost_params=candidate.catboost_params,
         )
     msg = f"unsupported candidate model kind: {candidate.model_kind}"
     raise ValueError(msg)
@@ -154,6 +362,13 @@ def zscore_scores(values: np.ndarray) -> np.ndarray:
 def scale_scores(multiplier: float) -> ScoreTransform:
     def transform(values: np.ndarray) -> np.ndarray:
         return values * multiplier
+
+    return transform
+
+
+def zscore_scale_scores(multiplier: float) -> ScoreTransform:
+    def transform(values: np.ndarray) -> np.ndarray:
+        return zscore_scores(values) * multiplier
 
     return transform
 
@@ -226,6 +441,30 @@ CANDIDATES: dict[str, CandidateSpec] = {
         lightgbm_nested_cv=False,
         score_transform=scale_scores(0.8),
     ),
+    "e8_scale_0p82": CandidateSpec(
+        candidate_id="e8_scale_0p82",
+        description="E8 blend with forecast scores scaled down by 0.82 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.82),
+    ),
+    "e8_scale_0p83": CandidateSpec(
+        candidate_id="e8_scale_0p83",
+        description="E8 blend with forecast scores scaled down by 0.83 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.83),
+    ),
+    "e8_scale_0p84": CandidateSpec(
+        candidate_id="e8_scale_0p84",
+        description="E8 blend with forecast scores scaled down by 0.84 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.84),
+    ),
     "e8_scale_0p85": CandidateSpec(
         candidate_id="e8_scale_0p85",
         description="E8 blend with forecast scores scaled down by 0.85 before optimization.",
@@ -233,6 +472,30 @@ CANDIDATES: dict[str, CandidateSpec] = {
         horizon_days=5,
         lightgbm_nested_cv=False,
         score_transform=scale_scores(0.85),
+    ),
+    "e8_scale_0p86": CandidateSpec(
+        candidate_id="e8_scale_0p86",
+        description="E8 blend with forecast scores scaled down by 0.86 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.86),
+    ),
+    "e8_scale_0p87": CandidateSpec(
+        candidate_id="e8_scale_0p87",
+        description="E8 blend with forecast scores scaled down by 0.87 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.87),
+    ),
+    "e8_scale_0p88": CandidateSpec(
+        candidate_id="e8_scale_0p88",
+        description="E8 blend with forecast scores scaled down by 0.88 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.88),
     ),
     "e8_scale_0p9": CandidateSpec(
         candidate_id="e8_scale_0p9",
@@ -313,6 +576,524 @@ CANDIDATES: dict[str, CandidateSpec] = {
         horizon_days=5,
         feature_columns=MOMENTUM_RISK_FEATURES,
         lightgbm_nested_cv=False,
+    ),
+    "catboost_return_zscore": CandidateSpec(
+        candidate_id="catboost_return_zscore",
+        description="CatBoost return regression with z-scored forecast scores.",
+        model_kind="catboost_regression",
+        horizon_days=5,
+        score_transform=zscore_scores,
+    ),
+    "catboost_return_zscore_deep": CandidateSpec(
+        candidate_id="catboost_return_zscore_deep",
+        description="CatBoost return regression with the deeper grid profile and z-scored scores.",
+        model_kind="catboost_regression",
+        horizon_days=5,
+        catboost_params=CATBOOST_PARAM_GRID[1],
+        score_transform=zscore_scores,
+    ),
+    "catboost_return_scale_0p85": CandidateSpec(
+        candidate_id="catboost_return_scale_0p85",
+        description="CatBoost return regression with z-scored scores scaled by 0.85.",
+        model_kind="catboost_regression",
+        horizon_days=5,
+        score_transform=zscore_scale_scores(0.85),
+    ),
+    "catboost_return_scale_1p20": CandidateSpec(
+        candidate_id="catboost_return_scale_1p20",
+        description="CatBoost return regression with z-scored scores scaled by 1.20.",
+        model_kind="catboost_regression",
+        horizon_days=5,
+        score_transform=zscore_scale_scores(1.20),
+    ),
+    "catboost_rank_target_zscore": CandidateSpec(
+        candidate_id="catboost_rank_target_zscore",
+        description="CatBoost regression trained on 5-day forward ranks with z-scored scores.",
+        model_kind="catboost_regression",
+        horizon_days=5,
+        training_target_column="fwd_rank_5d",
+        score_transform=zscore_scores,
+    ),
+    "catboost_top_tercile_zscore": CandidateSpec(
+        candidate_id="catboost_top_tercile_zscore",
+        description="CatBoost top-tercile classifier with z-scored probabilities.",
+        model_kind="catboost_classification",
+        horizon_days=5,
+        training_target_column="fwd_is_top_tercile_5d",
+        score_transform=zscore_scores,
+    ),
+    "catboost_momentum_return_zscore": CandidateSpec(
+        candidate_id="catboost_momentum_return_zscore",
+        description="CatBoost return regression using momentum, rank, and return features.",
+        model_kind="catboost_regression",
+        horizon_days=5,
+        feature_columns=MOMENTUM_RETURN_FEATURES,
+        score_transform=zscore_scores,
+    ),
+    "catboost_momentum_risk_zscore": CandidateSpec(
+        candidate_id="catboost_momentum_risk_zscore",
+        description="CatBoost return regression using momentum, risk, drawdown, and short returns.",
+        model_kind="catboost_regression",
+        horizon_days=5,
+        feature_columns=MOMENTUM_RISK_FEATURES,
+        score_transform=zscore_scores,
+    ),
+    "ridge_catboost_1p0_1p0_scale_1p00": CandidateSpec(
+        candidate_id="ridge_catboost_1p0_1p0_scale_1p00",
+        description="Ridge plus CatBoost weighted blend with 1.0/1.0 weights and 1.00 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.0,
+        catboost_weight=1.0,
+        score_transform=scale_scores(1.00),
+    ),
+    "ridge_catboost_1p2_0p8_scale_1p00": CandidateSpec(
+        candidate_id="ridge_catboost_1p2_0p8_scale_1p00",
+        description="Ridge plus CatBoost weighted blend with 1.2/0.8 weights and 1.00 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.2,
+        catboost_weight=0.8,
+        score_transform=scale_scores(1.00),
+    ),
+    "ridge_catboost_0p8_1p2_scale_1p00": CandidateSpec(
+        candidate_id="ridge_catboost_0p8_1p2_scale_1p00",
+        description="Ridge plus CatBoost weighted blend with 0.8/1.2 weights and 1.00 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=0.8,
+        catboost_weight=1.2,
+        score_transform=scale_scores(1.00),
+    ),
+    "ridge_catboost_1p0_1p0_scale_1p20": CandidateSpec(
+        candidate_id="ridge_catboost_1p0_1p0_scale_1p20",
+        description="Ridge plus CatBoost weighted blend with 1.0/1.0 weights and 1.20 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.0,
+        catboost_weight=1.0,
+        score_transform=scale_scores(1.20),
+    ),
+    "ridge_catboost_1p2_0p8_scale_1p20": CandidateSpec(
+        candidate_id="ridge_catboost_1p2_0p8_scale_1p20",
+        description="Ridge plus CatBoost weighted blend with 1.2/0.8 weights and 1.20 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.2,
+        catboost_weight=0.8,
+        score_transform=scale_scores(1.20),
+    ),
+    "ridge_catboost_1p5_0p5_scale_1p00": CandidateSpec(
+        candidate_id="ridge_catboost_1p5_0p5_scale_1p00",
+        description="Ridge plus CatBoost weighted blend with 1.5/0.5 weights and 1.00 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.5,
+        catboost_weight=0.5,
+        score_transform=scale_scores(1.00),
+    ),
+    "ridge_catboost_1p5_0p5_scale_1p20": CandidateSpec(
+        candidate_id="ridge_catboost_1p5_0p5_scale_1p20",
+        description="Ridge plus CatBoost weighted blend with 1.5/0.5 weights and 1.20 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.5,
+        catboost_weight=0.5,
+        score_transform=scale_scores(1.20),
+    ),
+    "ridge_catboost_1p5_0p5_scale_1p30": CandidateSpec(
+        candidate_id="ridge_catboost_1p5_0p5_scale_1p30",
+        description="Ridge plus CatBoost weighted blend with 1.5/0.5 weights and 1.30 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.5,
+        catboost_weight=0.5,
+        score_transform=scale_scores(1.30),
+    ),
+    "ridge_catboost_1p5_0p5_scale_1p50": CandidateSpec(
+        candidate_id="ridge_catboost_1p5_0p5_scale_1p50",
+        description="Ridge plus CatBoost weighted blend with 1.5/0.5 weights and 1.50 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.5,
+        catboost_weight=0.5,
+        score_transform=scale_scores(1.50),
+    ),
+    "ridge_catboost_1p5_0p5_scale_1p80": CandidateSpec(
+        candidate_id="ridge_catboost_1p5_0p5_scale_1p80",
+        description="Ridge plus CatBoost weighted blend with 1.5/0.5 weights and 1.80 scale.",
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.5,
+        catboost_weight=0.5,
+        score_transform=scale_scores(1.80),
+    ),
+    "ridge_catboost_1p5_0p5_deep_scale_1p20": CandidateSpec(
+        candidate_id="ridge_catboost_1p5_0p5_deep_scale_1p20",
+        description=(
+            "Ridge plus deeper CatBoost weighted blend with 1.5/0.5 weights and 1.20 scale."
+        ),
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        ridge_weight=1.5,
+        catboost_weight=0.5,
+        catboost_params=CATBOOST_PARAM_GRID[1],
+        score_transform=scale_scores(1.20),
+    ),
+    "ridge_catboost_momentum_return_1p5_0p5_scale_1p20": CandidateSpec(
+        candidate_id="ridge_catboost_momentum_return_1p5_0p5_scale_1p20",
+        description=(
+            "Ridge plus CatBoost blend using momentum/return features, 1.5/0.5 weights, and "
+            "1.20 scale."
+        ),
+        model_kind="ridge_catboost_blend",
+        horizon_days=5,
+        feature_columns=MOMENTUM_RETURN_FEATURES,
+        ridge_weight=1.5,
+        catboost_weight=0.5,
+        score_transform=scale_scores(1.20),
+    ),
+    "e8_catboost_1p2_0p8_0p2_scale_1p20": CandidateSpec(
+        candidate_id="e8_catboost_1p2_0p8_0p2_scale_1p20",
+        description=(
+            "Ridge, LightGBM, and CatBoost blend with 1.2/0.8/0.2 weights and 1.20 scale."
+        ),
+        model_kind="weighted_e8_catboost_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        catboost_weight=0.2,
+        score_transform=scale_scores(1.20),
+    ),
+    "e8_catboost_1p2_0p8_0p5_scale_1p20": CandidateSpec(
+        candidate_id="e8_catboost_1p2_0p8_0p5_scale_1p20",
+        description=(
+            "Ridge, LightGBM, and CatBoost blend with 1.2/0.8/0.5 weights and 1.20 scale."
+        ),
+        model_kind="weighted_e8_catboost_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        catboost_weight=0.5,
+        score_transform=scale_scores(1.20),
+    ),
+    "e8_catboost_1p3_0p7_0p2_scale_1p20": CandidateSpec(
+        candidate_id="e8_catboost_1p3_0p7_0p2_scale_1p20",
+        description=(
+            "Ridge, LightGBM, and CatBoost blend with 1.3/0.7/0.2 weights and 1.20 scale."
+        ),
+        model_kind="weighted_e8_catboost_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.3,
+        lightgbm_weight=0.7,
+        catboost_weight=0.2,
+        score_transform=scale_scores(1.20),
+    ),
+    "e8_catboost_1p2_0p8_0p2_scale_1p30": CandidateSpec(
+        candidate_id="e8_catboost_1p2_0p8_0p2_scale_1p30",
+        description=(
+            "Ridge, LightGBM, and CatBoost blend with 1.2/0.8/0.2 weights and 1.30 scale."
+        ),
+        model_kind="weighted_e8_catboost_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        catboost_weight=0.2,
+        score_transform=scale_scores(1.30),
+    ),
+    "e8_weight_ridge_1p25_lgbm_0p75_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p25_lgbm_0p75_scale_0p85",
+        description="E8 weighted blend with 1.25 Ridge, 0.75 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.25,
+        lightgbm_weight=0.75,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_1p15_lgbm_0p85_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p15_lgbm_0p85_scale_0p85",
+        description="E8 weighted blend with 1.15 Ridge, 0.85 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.15,
+        lightgbm_weight=0.85,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p85",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_1p18_lgbm_0p82_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p18_lgbm_0p82_scale_0p85",
+        description="E8 weighted blend with 1.18 Ridge, 0.82 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.18,
+        lightgbm_weight=0.82,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_1p19_lgbm_0p81_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p19_lgbm_0p81_scale_0p85",
+        description="E8 weighted blend with 1.19 Ridge, 0.81 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.19,
+        lightgbm_weight=0.81,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_1p21_lgbm_0p79_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p21_lgbm_0p79_scale_0p85",
+        description="E8 weighted blend with 1.21 Ridge, 0.79 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.21,
+        lightgbm_weight=0.79,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_1p22_lgbm_0p78_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p22_lgbm_0p78_scale_0p85",
+        description="E8 weighted blend with 1.22 Ridge, 0.78 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.22,
+        lightgbm_weight=0.78,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p82": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p82",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.82 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.82),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p86": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p86",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.86 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.86),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p87": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p87",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.87 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.87),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p88": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p88",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.88 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.88),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p89": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p89",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.89 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.89),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p90": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p90",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.90 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.90),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p92": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p92",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.92 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.92),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p94": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p94",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.94 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.94),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p96": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p96",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.96 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.96),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_0p98": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_0p98",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 0.98 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(0.98),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_1p00": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_1p00",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 1.00 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(1.00),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_1p05": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_1p05",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 1.05 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(1.05),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_1p10": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_1p10",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 1.10 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(1.10),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_1p15": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_1p15",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 1.15 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(1.15),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_1p20": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_1p20",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 1.20 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(1.20),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_1p30": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_1p30",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 1.30 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(1.30),
+    ),
+    "e8_weight_ridge_1p2_lgbm_0p8_scale_1p50": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p2_lgbm_0p8_scale_1p50",
+        description="E8 weighted blend with 1.2 Ridge, 0.8 LightGBM, and 1.50 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.2,
+        lightgbm_weight=0.8,
+        score_transform=scale_scores(1.50),
+    ),
+    "e8_weight_ridge_1p3_lgbm_0p7_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p3_lgbm_0p7_scale_0p85",
+        description="E8 weighted blend with 1.3 Ridge, 0.7 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.3,
+        lightgbm_weight=0.7,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_1p35_lgbm_0p65_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p35_lgbm_0p65_scale_0p85",
+        description="E8 weighted blend with 1.35 Ridge, 0.65 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.35,
+        lightgbm_weight=0.65,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_1p5_lgbm_0p5_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_1p5_lgbm_0p5_scale_0p85",
+        description="E8 weighted blend with 1.5 Ridge, 0.5 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=1.5,
+        lightgbm_weight=0.5,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_0p75_lgbm_1p25_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_0p75_lgbm_1p25_scale_0p85",
+        description="E8 weighted blend with 0.75 Ridge, 1.25 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=0.75,
+        lightgbm_weight=1.25,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_weight_ridge_0p5_lgbm_1p5_scale_0p85": CandidateSpec(
+        candidate_id="e8_weight_ridge_0p5_lgbm_1p5_scale_0p85",
+        description="E8 weighted blend with 0.5 Ridge, 1.5 LightGBM, and 0.85 score scale.",
+        model_kind="weighted_e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        ridge_weight=0.5,
+        lightgbm_weight=1.5,
+        score_transform=scale_scores(0.85),
     ),
     "ridge_return_zscore": CandidateSpec(
         candidate_id="ridge_return_zscore",

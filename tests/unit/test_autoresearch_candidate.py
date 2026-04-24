@@ -103,3 +103,41 @@ def test_build_model_factory_returns_predictive_model() -> None:
 
     assert len(predictions) == len(train)
     assert all(np.isfinite(predictions))
+
+
+def test_build_model_factory_returns_catboost_candidate() -> None:
+    train = pd.DataFrame(
+        {
+            "ticker": ["AAA", "BBB", "CCC", "AAA", "BBB", "CCC"],
+            "date": [
+                "2026-01-01",
+                "2026-01-01",
+                "2026-01-01",
+                "2026-01-08",
+                "2026-01-08",
+                "2026-01-08",
+            ],
+            "momentum_21d": [0.1, -0.1, 0.05, 0.2, -0.2, 0.08],
+            "volatility_21d": [0.2, 0.3, 0.25, 0.2, 0.3, 0.25],
+            "fwd_return_5d": [0.03, -0.01, 0.01, 0.04, -0.02, 0.02],
+        }
+    )
+    candidate = CandidateSpec(
+        candidate_id="catboost_test",
+        description="CatBoost test",
+        model_kind="catboost_regression",
+        feature_columns=("momentum_21d", "volatility_21d"),
+        catboost_params={
+            "iterations": 5,
+            "learning_rate": 0.1,
+            "depth": 2,
+            "l2_leaf_reg": 3.0,
+        },
+    )
+
+    factory = build_model_factory(candidate, candidate.feature_columns)
+    model = factory(train)
+    predictions = model.predict(train[["momentum_21d", "volatility_21d"]])
+
+    assert len(predictions) == len(train)
+    assert all(np.isfinite(predictions))

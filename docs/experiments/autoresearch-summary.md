@@ -3,18 +3,19 @@
 ## Experiment Design
 
 The autoresearch harness adapts the upstream autoresearch pattern to this repository without adding
-a runtime dependency. Candidate model logic lives in `src/stock_analysis/ml/autoresearch_candidate.py`.
-The evaluator in `src/stock_analysis/ml/autoresearch_eval.py` is fixed and uses the same
-walk-forward backtest, optimizer, portfolio metrics, and aligned SPY-relative IR calculation as the
-Phase 2 reporting path.
+a runtime dependency on the autoresearch project. Candidate model logic lives in
+`src/stock_analysis/ml/autoresearch_candidate.py`. The evaluator in
+`src/stock_analysis/ml/autoresearch_eval.py` is fixed and uses the same walk-forward backtest,
+optimizer, portfolio metrics, and aligned SPY-relative IR calculation as the Phase 2 reporting path.
 
-MLflow is added as an optional tracking sink for this harness. When enabled, it logs the exact
-evaluator result object, flattened params, metrics, decision tags, and emitted artifacts. The
-append-only TSV ledger remains the audit source for promotion decisions.
+MLflow is enabled as an optional tracking sink. Each tracked run logs the evaluator result object,
+flattened parameters, portfolio metrics, decision tags, and the append-only TSV ledger artifact.
+The ledger at `experiments/autoresearch/results.tsv` remains the audit source for promotion
+decisions.
 
-Fast-loop evaluations use the Phase 2 source artifacts, the latest top 100 assets by
-`dollar_volume_21d`, weekly 5-trading-day targets, 5 bps transaction costs, a 0.30 max-weight cap,
-and the turnover-aware optimizer.
+Fast-loop evaluations use `data/runs/phase2-source-20260424`, the latest top 100 assets by
+`dollar_volume_21d`, 5-trading-day forward targets, 48 requested rebalances, 5 bps transaction
+costs, a 0.30 optimizer max-weight cap, and the turnover-aware optimizer.
 
 ## Baseline
 
@@ -35,32 +36,47 @@ The starting point is the documented Phase 2 E8 Ridge plus LightGBM blend:
 | Sharpe-difference 95% CI | [-0.446, 1.542] |
 | Decision | provisional |
 
-## ML Model Result
+## Search Results
 
-The seeded `e8_baseline` candidate was evaluated through the new harness against
-`data/runs/phase2-source-20260424` with top 100 assets, 48 requested rebalances, and a 0.30
-optimizer max-weight cap. The measured metrics matched the documented Phase 2 E8 baseline:
-
-| Candidate | Sharpe | SPY Sharpe | Sharpe Diff | Active Return | SPY-Relative IR | CI Low | CI High | Status |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `e8_baseline` | 2.987197 | 1.130685 | 1.856511 | 0.636036 | 2.212435 | -0.445541 | 1.541675 | provisional |
-
-The first MLflow-tracked search batch evaluated score-calibration, feature-subset, Ridge, LightGBM
-regression, and LightGBM LambdaRank candidates. The best candidate was `e8_scale_0p85`, which keeps
-the same Ridge plus LightGBM model family as E8 and scales forecast scores by `0.85` before
-optimization.
+The strongest model found in the latest MLflow-backed search is
+`e8_weight_ridge_1p2_lgbm_0p8_scale_1p20`. It keeps the E8 model family, reweights the internal
+z-scored model legs toward Ridge, and scales the final forecast score by 1.20 before optimization.
 
 | Candidate | Sharpe | SPY Sharpe | Sharpe Diff | Active Return | SPY-Relative IR | CI Low | Mean Turnover | Status | Objective Improved |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| `e8_scale_0p85` | 3.026434 | 1.130685 | 1.895749 | 0.603803 | 2.278831 | -0.399057 | 0.691957 | provisional | yes |
-| `e8_scale_0p9` | 3.023593 | 1.130685 | 1.892907 | 0.616570 | 2.263636 | -0.418502 | 0.689014 | provisional | yes |
-| `e8_scale_0p8` | 2.999766 | 1.130685 | 1.869081 | 0.586625 | 2.278141 | -0.397268 | 0.695324 | provisional | yes |
-| `e8_scale_4p0` | 2.991126 | 1.130685 | 1.860440 | 0.843023 | 2.105149 | -0.421310 | 0.671771 | provisional | no |
-| `e8_scale_0p5` | 2.984744 | 1.130685 | 1.854058 | 0.477388 | 2.417264 | -0.261428 | 0.718203 | provisional | no |
+| `e8_weight_ridge_1p2_lgbm_0p8_scale_1p20` | 3.255864 | 1.130685 | 2.125178 | 0.729631 | 2.313480 | -0.335028 | 0.682642 | provisional | yes |
+| `e8_weight_ridge_1p2_lgbm_0p8_scale_1p10` | 3.255394 | 1.130685 | 2.124709 | 0.706076 | 2.336423 | -0.351793 | 0.679460 | provisional | yes |
+| `e8_weight_ridge_1p2_lgbm_0p8_scale_1p30` | 3.253273 | 1.130685 | 2.122588 | 0.750389 | 2.291243 | -0.342935 | 0.683211 | provisional | yes |
+| `e8_weight_ridge_1p2_lgbm_0p8_scale_1p15` | 3.253133 | 1.130685 | 2.122448 | 0.717022 | 2.323494 | -0.343275 | 0.681167 | provisional | yes |
+| `e8_weight_ridge_1p2_lgbm_0p8_scale_1p05` | 3.241327 | 1.130685 | 2.110641 | 0.691341 | 2.341578 | -0.366302 | 0.678875 | provisional | yes |
 
-The winner improves the primary objective over baseline: Sharpe difference increases from
-`1.856511` to `1.895749`, and SPY-relative IR increases from `2.212435` to `2.278831`. It remains
-`provisional` because the Sharpe-difference bootstrap CI lower bound is still negative.
+The winner improves the baseline Sharpe difference from `1.856511` to `2.125178` and keeps
+SPY-relative IR above the baseline threshold at `2.313480`. It remains `provisional` because the
+Sharpe-difference bootstrap CI lower bound is still negative. MLflow run:
+`79481fba8545431d8a71a1ed699bc571`.
+
+## CatBoost Experiments
+
+CatBoost was added as a first-class candidate family in `src/stock_analysis/ml/phase2.py` and
+`src/stock_analysis/ml/autoresearch_candidate.py`. The batch covered standalone CatBoost return
+regression, a deeper CatBoost parameter profile, rank-label regression, top-tercile classification,
+momentum feature subsets, Ridge plus CatBoost blends, and a three-model Ridge plus LightGBM plus
+CatBoost ensemble.
+
+| CatBoost Candidate | Sharpe | SPY Sharpe | Sharpe Diff | Active Return | SPY-Relative IR | CI Low | Mean Turnover | Objective Improved |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `ridge_catboost_1p5_0p5_scale_1p80` | 3.250392 | 1.130685 | 2.119706 | 0.932179 | 2.172948 | -0.397155 | 0.679841 | no |
+| `e8_catboost_1p3_0p7_0p2_scale_1p20` | 3.224760 | 1.130685 | 2.094075 | 0.747811 | 2.276817 | -0.397780 | 0.663750 | yes |
+| `ridge_catboost_1p5_0p5_scale_1p30` | 3.138071 | 1.130685 | 2.007386 | 0.774161 | 2.243235 | -0.401370 | 0.682144 | yes |
+| `ridge_catboost_1p5_0p5_scale_1p20` | 3.070051 | 1.130685 | 1.939366 | 0.735213 | 2.230238 | -0.410118 | 0.685305 | yes |
+| `catboost_momentum_return_zscore` | 2.582096 | 1.130685 | 1.451410 | 0.556259 | 2.001439 | -0.433351 | 0.723880 | no |
+
+The best CatBoost-involved candidate that passes the objective gate is
+`e8_catboost_1p3_0p7_0p2_scale_1p20`, with MLflow run
+`7a0fdab08fa64eaeb06c555c61317c50`. It improves over the original baseline on point estimates but
+does not beat the best Ridge plus LightGBM candidate. The highest CatBoost Sharpe-difference point
+estimate is `ridge_catboost_1p5_0p5_scale_1p80`, but its SPY-relative IR falls below the baseline
+gate, so it is not a promotion candidate.
 
 ## Optimization Model Result
 
@@ -68,6 +84,11 @@ All candidate forecasts are evaluated through the same long-only optimizer:
 `mu^T w - gamma * w^T Sigma w - lambda_turnover * ||w - w_prev||_1`, subject to full investment,
 non-negative weights, and a max-weight cap. The fast-loop default keeps `gamma=10`,
 `lambda_turnover=0.001`, and `max_weight=0.30`.
+
+The optimizer sweep around the earlier `e8_scale_0p85` candidate confirmed that `max_weight=0.30`
+remains the best local cap among `0.20`, `0.25`, `0.28`, `0.32`, `0.35`, and `0.40` under the same
+evaluation contract. The new winning search direction came from model-leg weighting and score-scale
+calibration, not from changing the optimizer cap.
 
 ## SPY-Relative IR Audit
 
@@ -84,7 +105,11 @@ The `ir_observations` ledger column records the aligned row count used for this 
 
 ## Current Outcome
 
-The experiment improved the model objective but did not reach statistical `go`. The current
-champion is `e8_scale_0p85`, a calibrated E8 blend. Promotion should wait for a confirmation run
-with broader rebalance coverage and a production inference change that applies the same score
-scaling in `src/stock_analysis/forecasting/ml_forecast.py`.
+The current champion is `e8_weight_ridge_1p2_lgbm_0p8_scale_1p20`. It beats SPY on point estimates
+and improves materially over the original E8 baseline, but it is still a provisional candidate
+because the Sharpe-difference confidence interval lower bound remains negative.
+
+CatBoost is now available for continued experimentation, but the first CatBoost batches do not
+justify replacing the Ridge plus LightGBM production path. The next highest-value tests are broader
+rebalance coverage for the current champion and a narrower confirmation sweep around
+`scale=1.10` to `scale=1.20`, where Sharpe difference and SPY-relative IR are both strong.

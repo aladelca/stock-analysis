@@ -5,6 +5,7 @@ description = "One-shot S&P 500 portfolio assistant with Python optimization and
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "catboost>=1.2.8",
   "cvxpy>=1.4.3",
   "lightgbm>=4.6.0",
   "lxml>=5.2.0",
