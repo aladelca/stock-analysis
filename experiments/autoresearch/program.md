@@ -38,6 +38,10 @@ positive, and the Sharpe-difference confidence interval lower bound is above zer
      --results-tsv experiments/autoresearch/results.tsv
    ```
 
+   Add `--mlflow --mlflow-tracking-uri sqlite:///data/mlflow/mlflow.db` when MLflow comparison is
+   useful. MLflow is an optional mirror of the fixed result object, not a separate scoring
+   authority.
+
 4. Keep a candidate only when it improves the objective without weakening SPY-relative IR.
 5. Before promotion, run a confirmation evaluation with broader rebalance coverage and record the
    result in `docs/experiments/autoresearch-summary.md`.

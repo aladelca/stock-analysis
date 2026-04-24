@@ -31,6 +31,30 @@ uv run stock-analysis autoresearch-eval \
 Successful infrastructure runs exit `0` even when the candidate is rejected. The JSON `decision`
 block records `rejected`, `provisional`, or `go`.
 
+## MLflow Tracking
+
+MLflow is available as an optional tracking sink. It is aligned with this harness when used for
+browsing runs, comparing params, and collecting artifacts; it does not replace the fixed evaluator
+or append-only TSV ledger.
+
+```bash
+uv run --extra mlflow python scripts/autoresearch_eval.py \
+  --candidate e8_baseline \
+  --input-run-root data/runs/phase2-source-20260424 \
+  --max-assets 100 \
+  --max-rebalances 48 \
+  --optimizer-max-weight 0.30 \
+  --results-tsv experiments/autoresearch/results.tsv \
+  --mlflow \
+  --mlflow-tracking-uri sqlite:///data/mlflow/mlflow.db
+```
+
+Open the local UI with:
+
+```bash
+uv run --extra mlflow mlflow ui --backend-store-uri sqlite:///data/mlflow/mlflow.db
+```
+
 ## Promotion Rule
 
 A candidate must beat SPY on Sharpe, annualized active return, and SPY-relative information ratio.

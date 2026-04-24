@@ -8,6 +8,10 @@ The evaluator in `src/stock_analysis/ml/autoresearch_eval.py` is fixed and uses 
 walk-forward backtest, optimizer, portfolio metrics, and aligned SPY-relative IR calculation as the
 Phase 2 reporting path.
 
+MLflow is added as an optional tracking sink for this harness. When enabled, it logs the exact
+evaluator result object, flattened params, metrics, decision tags, and emitted artifacts. The
+append-only TSV ledger remains the audit source for promotion decisions.
+
 Fast-loop evaluations use the Phase 2 source artifacts, the latest top 100 assets by
 `dollar_volume_21d`, weekly 5-trading-day targets, 5 bps transaction costs, a 0.30 max-weight cap,
 and the turnover-aware optimizer.

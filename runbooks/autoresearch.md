@@ -10,6 +10,7 @@ confirmation run before promotion.
 
 - Phase 1 artifacts exist under `data/runs/phase2-source-20260424`.
 - Dependencies are installed through `uv`.
+- Use `uv run --extra mlflow ...` or `uv sync --extra mlflow` before using MLflow tracking.
 - The working tree is clean enough that candidate changes can be reviewed separately from evaluator
   or documentation changes.
 
@@ -27,6 +28,33 @@ uv run python scripts/autoresearch_eval.py \
 
 The command prints JSON and optionally appends one row to the TSV ledger. A rejected candidate is a
 valid evaluator outcome and still exits successfully.
+
+## MLflow Tracking
+
+MLflow logging is opt-in:
+
+```bash
+uv run --extra mlflow python scripts/autoresearch_eval.py \
+  --candidate e8_baseline \
+  --input-run-root data/runs/phase2-source-20260424 \
+  --max-assets 100 \
+  --max-rebalances 48 \
+  --optimizer-max-weight 0.30 \
+  --results-tsv experiments/autoresearch/results.tsv \
+  --mlflow \
+  --mlflow-tracking-uri sqlite:///data/mlflow/mlflow.db
+```
+
+The MLflow run logs evaluator params, portfolio/SPY/comparison metrics, decision tags, the complete
+`result.json`, and the TSV ledger artifact when emitted. Keep using
+`experiments/autoresearch/results.tsv` as the append-only audit ledger; MLflow is for interactive
+comparison and local artifact browsing.
+
+Start the local UI with:
+
+```bash
+uv run --extra mlflow mlflow ui --backend-store-uri sqlite:///data/mlflow/mlflow.db
+```
 
 ## Interpreting Results
 

@@ -30,6 +30,9 @@ tableau = [
 prepgen = [
   "cwprep>=0.5.5",
 ]
+mlflow = [
+  "mlflow>=3.11.1",
+]
 
 [project.scripts]
 stock-analysis = "stock_analysis.cli:app"

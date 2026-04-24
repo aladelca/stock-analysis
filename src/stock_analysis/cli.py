@@ -18,6 +18,11 @@ from stock_analysis.ml.autoresearch_eval import (
     result_to_json,
 )
 from stock_analysis.ml.experiments import run_experiment_from_config
+from stock_analysis.ml.mlflow_tracking import (
+    DEFAULT_MLFLOW_EXPERIMENT_NAME,
+    DEFAULT_MLFLOW_TRACKING_URI,
+    log_autoresearch_result,
+)
 from stock_analysis.ml.phase2 import Phase2Config, run_phase2
 from stock_analysis.pipeline.one_shot import run_one_shot
 from stock_analysis.tableau.export import export_existing_run_for_tableau
@@ -99,6 +104,21 @@ AUTORESEARCH_MAX_REBALANCES_OPTION = typer.Option(
     48,
     "--max-rebalances",
     help="Limit completed rebalance dates for faster autoresearch iterations.",
+)
+AUTORESEARCH_MLFLOW_OPTION = typer.Option(
+    False,
+    "--mlflow",
+    help="Log the evaluator result to MLflow.",
+)
+AUTORESEARCH_MLFLOW_TRACKING_URI_OPTION = typer.Option(
+    None,
+    "--mlflow-tracking-uri",
+    help=f"MLflow tracking URI. Defaults to {DEFAULT_MLFLOW_TRACKING_URI}.",
+)
+AUTORESEARCH_MLFLOW_EXPERIMENT_NAME_OPTION = typer.Option(
+    DEFAULT_MLFLOW_EXPERIMENT_NAME,
+    "--mlflow-experiment-name",
+    help="MLflow experiment name used when --mlflow is set.",
 )
 
 
@@ -184,6 +204,9 @@ def autoresearch_eval_command(
     iteration_id: str | None = typer.Option(None, "--iteration-id"),
     results_tsv: Path | None = AUTORESEARCH_RESULTS_TSV_OPTION,
     json_output: Path | None = AUTORESEARCH_JSON_OUTPUT_OPTION,
+    enable_mlflow: bool = AUTORESEARCH_MLFLOW_OPTION,
+    mlflow_tracking_uri: str | None = AUTORESEARCH_MLFLOW_TRACKING_URI_OPTION,
+    mlflow_experiment_name: str = AUTORESEARCH_MLFLOW_EXPERIMENT_NAME_OPTION,
 ) -> None:
     configure_logging()
     result = evaluate_candidate(
@@ -207,6 +230,23 @@ def autoresearch_eval_command(
     )
     if results_tsv is not None:
         append_result_tsv(results_tsv, result)
+    if enable_mlflow:
+        artifacts = [results_tsv] if results_tsv is not None else []
+        try:
+            run_id = log_autoresearch_result(
+                result,
+                tracking_uri=mlflow_tracking_uri,
+                experiment_name=mlflow_experiment_name,
+                artifacts=artifacts,
+            )
+        except RuntimeError as exc:
+            print(f"[red]{exc}[/red]")
+            raise typer.Exit(2) from exc
+        result["mlflow"] = {
+            "experiment_name": mlflow_experiment_name,
+            "run_id": run_id,
+            "tracking_uri": mlflow_tracking_uri or DEFAULT_MLFLOW_TRACKING_URI,
+        }
     output = result_to_json(result)
     if json_output is not None:
         json_output.parent.mkdir(parents=True, exist_ok=True)

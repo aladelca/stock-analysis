@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+import importlib
+import json
+from collections.abc import Iterable, Mapping
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+DEFAULT_MLFLOW_EXPERIMENT_NAME = "stock-analysis-autoresearch"
+DEFAULT_MLFLOW_TRACKING_URI = "sqlite:///data/mlflow/mlflow.db"
+DEFAULT_MLFLOW_ARTIFACT_DIR = Path("data/mlflow/artifacts")
+
+
+def log_autoresearch_result(
+    result: dict[str, Any],
+    *,
+    tracking_uri: str | None = None,
+    experiment_name: str = DEFAULT_MLFLOW_EXPERIMENT_NAME,
+    artifacts: Iterable[Path] = (),
+) -> str:
+    """Log an autoresearch evaluator result to MLflow and return the run id."""
+
+    mlflow = _import_mlflow()
+    resolved_tracking_uri = resolve_tracking_uri(tracking_uri)
+    mlflow.set_tracking_uri(resolved_tracking_uri)
+    _set_experiment(mlflow, experiment_name, resolved_tracking_uri)
+
+    candidate = result.get("candidate", {})
+    candidate_id = str(candidate.get("candidate_id", "unknown"))
+    iteration_id = str(result.get("iteration_id", "unknown"))
+    run_name = f"{candidate_id}-{iteration_id}"
+
+    with mlflow.start_run(run_name=run_name) as run:
+        mlflow.set_tags(_tags_for_result(result))
+        params = _params_for_result(result)
+        if params:
+            mlflow.log_params(params)
+        metrics = _metrics_for_result(result)
+        if metrics:
+            mlflow.log_metrics(metrics)
+        mlflow.log_dict(result, "result.json")
+        for artifact in artifacts:
+            if artifact.exists():
+                mlflow.log_artifact(str(artifact))
+        return str(run.info.run_id)
+
+
+def resolve_tracking_uri(tracking_uri: str | None) -> str:
+    if not tracking_uri:
+        return _ensure_sqlite_parent(DEFAULT_MLFLOW_TRACKING_URI)
+    if tracking_uri.startswith("sqlite:///"):
+        return _ensure_sqlite_parent(tracking_uri)
+    if "://" in tracking_uri or tracking_uri.startswith("databricks"):
+        return tracking_uri
+    path = Path(tracking_uri)
+    if path.suffix in {".db", ".sqlite", ".sqlite3"}:
+        return _ensure_sqlite_parent(f"sqlite:///{path.resolve()}")
+    return path.resolve().as_uri()
+
+
+def _ensure_sqlite_parent(tracking_uri: str) -> str:
+    db_path = tracking_uri.removeprefix("sqlite:///")
+    Path(db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    return tracking_uri
+
+
+def _set_experiment(mlflow: Any, experiment_name: str, tracking_uri: str) -> None:
+    if tracking_uri.startswith("sqlite:///"):
+        existing = mlflow.get_experiment_by_name(experiment_name)
+        if existing is None:
+            artifact_dir = DEFAULT_MLFLOW_ARTIFACT_DIR.resolve()
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            mlflow.create_experiment(
+                experiment_name,
+                artifact_location=artifact_dir.as_uri(),
+            )
+    mlflow.set_experiment(experiment_name)
+
+
+def _import_mlflow() -> Any:
+    try:
+        return importlib.import_module("mlflow")
+    except ImportError as exc:
+        msg = (
+            "MLflow tracking requires the optional mlflow extra. "
+            "Run `uv sync --extra mlflow` or prefix the command with `uv run --extra mlflow`."
+        )
+        raise RuntimeError(msg) from exc
+
+
+def _tags_for_result(result: dict[str, Any]) -> dict[str, str]:
+    candidate = result.get("candidate", {})
+    decision = result.get("decision", {})
+    return {
+        "stock_analysis.workflow": "autoresearch",
+        "candidate_id": str(candidate.get("candidate_id", "")),
+        "decision_status": str(decision.get("status", "")),
+        "passed_spy_gate": str(decision.get("passed_spy_gate", "")),
+        "objective_improved": str(decision.get("objective_improved", "")),
+        "git_commit": str(result.get("git_commit", "")),
+    }
+
+
+def _params_for_result(result: dict[str, Any]) -> dict[str, str | int | float | bool]:
+    raw: dict[str, Any] = {
+        "candidate": result.get("candidate", {}),
+        "config": result.get("config", {}),
+        "baseline": {"candidate_id": result.get("baseline", {}).get("candidate_id")},
+    }
+    flattened = _flatten(raw)
+    params: dict[str, str | int | float | bool] = {}
+    for key, value in flattened.items():
+        if value is None:
+            continue
+        params[key] = _param_value(value)
+    return params
+
+
+def _metrics_for_result(result: dict[str, Any]) -> dict[str, float]:
+    raw: dict[str, Any] = {
+        "portfolio": result.get("metrics", {}).get("portfolio", {}),
+        "spy": result.get("metrics", {}).get("spy", {}),
+        "benchmark_relative": result.get("metrics", {}).get("benchmark_relative", {}),
+        "comparison": result.get("metrics", {}).get("comparison", {}),
+        "baseline": result.get("baseline", {}),
+    }
+    metrics: dict[str, float] = {}
+    for key, value in _flatten(raw).items():
+        number = _finite_float(value)
+        if number is not None:
+            metrics[key] = number
+    return metrics
+
+
+def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {}
+        for key, nested in value.items():
+            normalized_key = _metric_key(str(key))
+            nested_prefix = f"{prefix}.{normalized_key}" if prefix else normalized_key
+            result.update(_flatten(nested, nested_prefix))
+        return result
+    return {prefix: value}
+
+
+def _param_value(value: Any) -> str | int | float | bool:
+    if isinstance(value, bool | int | float | str):
+        return value
+    return json.dumps(value, sort_keys=True)
+
+
+def _finite_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if np.isfinite(result) else None
+
+
+def _metric_key(value: str) -> str:
+    return value.replace(" ", "_").replace("/", "_")

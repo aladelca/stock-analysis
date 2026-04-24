@@ -9,6 +9,11 @@ from stock_analysis.ml.autoresearch_eval import (
     evaluate_candidate,
     result_to_json,
 )
+from stock_analysis.ml.mlflow_tracking import (
+    DEFAULT_MLFLOW_EXPERIMENT_NAME,
+    DEFAULT_MLFLOW_TRACKING_URI,
+    log_autoresearch_result,
+)
 
 
 def main() -> int:
@@ -47,6 +52,21 @@ def main() -> int:
         default=None,
         help="Optional path for the full JSON result.",
     )
+    parser.add_argument(
+        "--mlflow",
+        action="store_true",
+        help="Log the evaluator result to MLflow.",
+    )
+    parser.add_argument(
+        "--mlflow-tracking-uri",
+        default=None,
+        help=f"MLflow tracking URI. Defaults to {DEFAULT_MLFLOW_TRACKING_URI}.",
+    )
+    parser.add_argument(
+        "--mlflow-experiment-name",
+        default=DEFAULT_MLFLOW_EXPERIMENT_NAME,
+        help="MLflow experiment name used when --mlflow is set.",
+    )
     args = parser.parse_args()
 
     result = evaluate_candidate(
@@ -70,6 +90,19 @@ def main() -> int:
     )
     if args.results_tsv is not None:
         append_result_tsv(args.results_tsv, result)
+    if args.mlflow:
+        artifacts = [args.results_tsv] if args.results_tsv is not None else []
+        run_id = log_autoresearch_result(
+            result,
+            tracking_uri=args.mlflow_tracking_uri,
+            experiment_name=args.mlflow_experiment_name,
+            artifacts=artifacts,
+        )
+        result["mlflow"] = {
+            "experiment_name": args.mlflow_experiment_name,
+            "run_id": run_id,
+            "tracking_uri": args.mlflow_tracking_uri or DEFAULT_MLFLOW_TRACKING_URI,
+        }
     output = result_to_json(result)
     if args.json_output is not None:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
