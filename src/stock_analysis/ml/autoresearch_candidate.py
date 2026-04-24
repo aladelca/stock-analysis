@@ -151,6 +151,49 @@ def zscore_scores(values: np.ndarray) -> np.ndarray:
     return (values - float(np.mean(values))) / std
 
 
+def scale_scores(multiplier: float) -> ScoreTransform:
+    def transform(values: np.ndarray) -> np.ndarray:
+        return values * multiplier
+
+    return transform
+
+
+def rank_pct_scores(values: np.ndarray) -> np.ndarray:
+    if len(values) == 0:
+        return values
+    return pd.Series(values).rank(method="average", pct=True).to_numpy(dtype=float)
+
+
+MOMENTUM_RETURN_FEATURES = (
+    "momentum_21d",
+    "momentum_63d",
+    "momentum_126d",
+    "momentum_252d",
+    "momentum_21d_rank",
+    "momentum_63d_rank",
+    "momentum_126d_rank",
+    "momentum_252d_rank",
+    "return_5d",
+    "return_21d",
+    "return_21d_excess",
+)
+
+MOMENTUM_RISK_FEATURES = (
+    "momentum_21d",
+    "momentum_63d",
+    "momentum_126d",
+    "momentum_252d",
+    "volatility_21d",
+    "volatility_63d",
+    "volatility_126d",
+    "max_drawdown_63d",
+    "max_drawdown_252d",
+    "return_5d",
+    "return_21d",
+    "return_21d_excess",
+)
+
+
 CANDIDATES: dict[str, CandidateSpec] = {
     "e8_baseline": CandidateSpec(
         candidate_id="e8_baseline",
@@ -158,6 +201,142 @@ CANDIDATES: dict[str, CandidateSpec] = {
         model_kind="e8_blend",
         horizon_days=5,
         lightgbm_nested_cv=False,
+    ),
+    "e8_scale_0p5": CandidateSpec(
+        candidate_id="e8_scale_0p5",
+        description="E8 blend with forecast scores scaled down by 0.5 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.5),
+    ),
+    "e8_scale_0p7": CandidateSpec(
+        candidate_id="e8_scale_0p7",
+        description="E8 blend with forecast scores scaled down by 0.7 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.7),
+    ),
+    "e8_scale_0p8": CandidateSpec(
+        candidate_id="e8_scale_0p8",
+        description="E8 blend with forecast scores scaled down by 0.8 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.8),
+    ),
+    "e8_scale_0p85": CandidateSpec(
+        candidate_id="e8_scale_0p85",
+        description="E8 blend with forecast scores scaled down by 0.85 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.85),
+    ),
+    "e8_scale_0p9": CandidateSpec(
+        candidate_id="e8_scale_0p9",
+        description="E8 blend with forecast scores scaled down by 0.9 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.9),
+    ),
+    "e8_scale_0p95": CandidateSpec(
+        candidate_id="e8_scale_0p95",
+        description="E8 blend with forecast scores scaled down by 0.95 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(0.95),
+    ),
+    "e8_scale_1p2": CandidateSpec(
+        candidate_id="e8_scale_1p2",
+        description="E8 blend with forecast scores scaled up by 1.2 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(1.2),
+    ),
+    "e8_scale_1p5": CandidateSpec(
+        candidate_id="e8_scale_1p5",
+        description="E8 blend with forecast scores scaled up by 1.5 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(1.5),
+    ),
+    "e8_scale_2p0": CandidateSpec(
+        candidate_id="e8_scale_2p0",
+        description="E8 blend with forecast scores scaled up by 2.0 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(2.0),
+    ),
+    "e8_scale_3p0": CandidateSpec(
+        candidate_id="e8_scale_3p0",
+        description="E8 blend with forecast scores scaled up by 3.0 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(3.0),
+    ),
+    "e8_scale_4p0": CandidateSpec(
+        candidate_id="e8_scale_4p0",
+        description="E8 blend with forecast scores scaled up by 4.0 before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=scale_scores(4.0),
+    ),
+    "e8_rank_pct": CandidateSpec(
+        candidate_id="e8_rank_pct",
+        description="E8 blend converted to percentile ranks before optimization.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=rank_pct_scores,
+    ),
+    "e8_momentum_return": CandidateSpec(
+        candidate_id="e8_momentum_return",
+        description="E8 blend using momentum, rank, and return features without liquidity.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        feature_columns=MOMENTUM_RETURN_FEATURES,
+        lightgbm_nested_cv=False,
+    ),
+    "e8_momentum_risk": CandidateSpec(
+        candidate_id="e8_momentum_risk",
+        description="E8 blend using momentum, risk, drawdown, and short return features.",
+        model_kind="e8_blend",
+        horizon_days=5,
+        feature_columns=MOMENTUM_RISK_FEATURES,
+        lightgbm_nested_cv=False,
+    ),
+    "ridge_return_zscore": CandidateSpec(
+        candidate_id="ridge_return_zscore",
+        description="Ridge return model with z-scored forecast scores.",
+        model_kind="ridge",
+        horizon_days=5,
+        score_transform=zscore_scores,
+    ),
+    "lightgbm_return_zscore": CandidateSpec(
+        candidate_id="lightgbm_return_zscore",
+        description="LightGBM return model with z-scored forecast scores.",
+        model_kind="lightgbm_regression",
+        horizon_days=5,
+        lightgbm_nested_cv=False,
+        score_transform=zscore_scores,
+    ),
+    "lightgbm_rank": CandidateSpec(
+        candidate_id="lightgbm_rank",
+        description="LightGBM LambdaRank model on 5-day forward ranks.",
+        model_kind="lightgbm_rank",
+        horizon_days=5,
+        training_target_column="fwd_rank_5d",
+        lightgbm_nested_cv=False,
+        score_transform=zscore_scores,
     ),
     "ridge_rank": CandidateSpec(
         candidate_id="ridge_rank",

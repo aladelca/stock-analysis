@@ -41,13 +41,26 @@ The seeded `e8_baseline` candidate was evaluated through the new harness against
 `data/runs/phase2-source-20260424` with top 100 assets, 48 requested rebalances, and a 0.30
 optimizer max-weight cap. The measured metrics matched the documented Phase 2 E8 baseline:
 
-| Candidate | Sharpe | SPY Sharpe | Active Return | SPY-Relative IR | CI Low | CI High | Status |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `e8_baseline` | 2.987197 | 1.130685 | 0.636036 | 2.212435 | -0.445541 | 1.541675 | provisional |
+| Candidate | Sharpe | SPY Sharpe | Sharpe Diff | Active Return | SPY-Relative IR | CI Low | CI High | Status |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `e8_baseline` | 2.987197 | 1.130685 | 1.856511 | 0.636036 | 2.212435 | -0.445541 | 1.541675 | provisional |
 
-No new autoresearch candidate has been promoted yet. The initial harness result confirms that the
-candidate registry can reproduce the current production model family, so future loop results can be
-compared against a known reference.
+The first MLflow-tracked search batch evaluated score-calibration, feature-subset, Ridge, LightGBM
+regression, and LightGBM LambdaRank candidates. The best candidate was `e8_scale_0p85`, which keeps
+the same Ridge plus LightGBM model family as E8 and scales forecast scores by `0.85` before
+optimization.
+
+| Candidate | Sharpe | SPY Sharpe | Sharpe Diff | Active Return | SPY-Relative IR | CI Low | Mean Turnover | Status | Objective Improved |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `e8_scale_0p85` | 3.026434 | 1.130685 | 1.895749 | 0.603803 | 2.278831 | -0.399057 | 0.691957 | provisional | yes |
+| `e8_scale_0p9` | 3.023593 | 1.130685 | 1.892907 | 0.616570 | 2.263636 | -0.418502 | 0.689014 | provisional | yes |
+| `e8_scale_0p8` | 2.999766 | 1.130685 | 1.869081 | 0.586625 | 2.278141 | -0.397268 | 0.695324 | provisional | yes |
+| `e8_scale_4p0` | 2.991126 | 1.130685 | 1.860440 | 0.843023 | 2.105149 | -0.421310 | 0.671771 | provisional | no |
+| `e8_scale_0p5` | 2.984744 | 1.130685 | 1.854058 | 0.477388 | 2.417264 | -0.261428 | 0.718203 | provisional | no |
+
+The winner improves the primary objective over baseline: Sharpe difference increases from
+`1.856511` to `1.895749`, and SPY-relative IR increases from `2.212435` to `2.278831`. It remains
+`provisional` because the Sharpe-difference bootstrap CI lower bound is still negative.
 
 ## Optimization Model Result
 
@@ -71,7 +84,7 @@ The `ir_observations` ledger column records the aligned row count used for this 
 
 ## Current Outcome
 
-The baseline beats SPY on point estimates, but remains provisional because the Sharpe-difference CI
-includes zero. Future autoresearch runs should update this document with the best rejected,
-provisional, and confirmed candidates after the ledger captures enough experiments to justify a
-promotion decision.
+The experiment improved the model objective but did not reach statistical `go`. The current
+champion is `e8_scale_0p85`, a calibrated E8 blend. Promotion should wait for a confirmation run
+with broader rebalance coverage and a production inference change that applies the same score
+scaling in `src/stock_analysis/forecasting/ml_forecast.py`.
