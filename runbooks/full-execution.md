@@ -89,8 +89,11 @@ Notes:
 
 ## 5. Run The One-Shot Pipeline
 
+The default production config uses the Phase 2 E8 ML forecast engine. To make the
+forecast choice explicit in operator runs:
+
 ```bash
-uv run stock-analysis run-one-shot --config configs/portfolio.yaml
+uv run stock-analysis run-one-shot --config configs/portfolio.yaml --forecast-engine ml
 ```
 
 Expected output includes:
@@ -227,6 +230,16 @@ cp -f configs/portfolio.yaml configs/portfolio.local.yaml
 Edit `configs/portfolio.local.yaml`:
 
 ```yaml
+forecast:
+  engine: ml
+  ml_model_version: phase2-e8-ridge-lightgbm-blend-v1
+  ml_horizon_days: 5
+  ml_max_assets: 100
+
+optimizer:
+  max_weight: 0.30
+  lambda_turnover: 0.001
+
 tableau:
   export_csv: true
   export_hyper: true
@@ -317,6 +330,16 @@ cp -f configs/portfolio.yaml configs/portfolio.local.yaml
 Edit `configs/portfolio.local.yaml`:
 
 ```yaml
+forecast:
+  engine: ml
+  ml_model_version: phase2-e8-ridge-lightgbm-blend-v1
+  ml_horizon_days: 5
+  ml_max_assets: 100
+
+optimizer:
+  max_weight: 0.30
+  lambda_turnover: 0.001
+
 tableau:
   export_csv: true
   export_hyper: true
@@ -327,16 +350,18 @@ tableau:
   workbook_output_path: tableau/workbooks/portfolio_recommendations.twb
 ```
 
-Publish the Prep-generated mart:
-
-```bash
-uv run stock-analysis publish-tableau tableau_prep_outputs/portfolio_dashboard_mart.hyper --config configs/portfolio.local.yaml
-```
-
-Or publish the Python-generated Hyper file:
+Publishing does not rerun the forecast model. Run `run-one-shot` and `export-tableau`
+first, then publish the Python-generated Hyper file from that ML run:
 
 ```bash
 uv run stock-analysis publish-tableau "data/runs/$RUN_ID/gold/tableau_dashboard_mart.hyper" --config configs/portfolio.local.yaml
+```
+
+Publish the Prep-generated mart only after rerunning the Prep flow against the same
+ML run outputs:
+
+```bash
+uv run stock-analysis publish-tableau tableau_prep_outputs/portfolio_dashboard_mart.hyper --config configs/portfolio.local.yaml
 ```
 
 ## 13. Build Tableau Dashboard

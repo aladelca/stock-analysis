@@ -30,12 +30,43 @@ cp -f configs/portfolio.yaml configs/portfolio.local.yaml
 Enable publishing in `configs/portfolio.local.yaml`:
 
 ```yaml
+forecast:
+  engine: ml
+  ml_model_version: phase2-e8-ridge-lightgbm-blend-v1
+  ml_horizon_days: 5
+  ml_max_assets: 100
+
+optimizer:
+  max_weight: 0.30
+  lambda_turnover: 0.001
+
 tableau:
   export_hyper: true
   publish_enabled: true
 ```
 
-Then publish:
+Regenerate the pipeline outputs before publishing. Publishing only uploads an existing
+`.hyper` file; it does not rerun the forecast model.
+
+```bash
+uv run stock-analysis run-one-shot --config configs/portfolio.local.yaml --forecast-engine ml
+```
+
+Capture the printed run id and export the Tableau Hyper extract:
+
+```bash
+export RUN_ID="<run-id>"
+uv run stock-analysis export-tableau --config configs/portfolio.local.yaml --run-id "$RUN_ID"
+```
+
+Publish the Python-generated Hyper file for the ML run:
+
+```bash
+uv run stock-analysis publish-tableau "data/runs/$RUN_ID/gold/tableau_dashboard_mart.hyper" --config configs/portfolio.local.yaml
+```
+
+If a Tableau Prep flow is used and writes to `tableau_prep_outputs/`, publish that
+Prep-generated artifact only after rerunning the flow against the same ML run outputs:
 
 ```bash
 uv run stock-analysis publish-tableau tableau_prep_outputs/portfolio_dashboard_mart.hyper --config configs/portfolio.local.yaml
