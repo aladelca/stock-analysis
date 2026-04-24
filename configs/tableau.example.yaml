@@ -1,0 +1,11 @@
+tableau:
+  export_csv: true
+  export_hyper: true
+  publish_enabled: false
+  prep_output_root: tableau_prep_outputs
+  server_url: https://tableau.example.com
+  site_name: example-site
+  project_name: Default
+  datasource_name: portfolio_dashboard_mart
+  workbook_name: portfolio_recommendations
+  workbook_output_path: tableau/workbooks/portfolio_recommendations.twb

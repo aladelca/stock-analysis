@@ -1,0 +1,56 @@
+run:
+  as_of_date: null
+  output_root: data
+  run_id: null
+
+universe:
+  provider: wikipedia_sp500
+  source_url: https://en.wikipedia.org/wiki/List_of_S%26P_500_companies
+
+prices:
+  provider: yfinance
+  lookback_years: 5
+  batch_size: 100
+  benchmark_tickers: [SPY]
+
+features:
+  min_history_days: 252
+  momentum_windows: [63, 126, 252]
+  volatility_window: 63
+  drawdown_window: 252
+  moving_average_windows: [50, 200]
+
+panel_features:
+  min_history_days: 252
+  momentum_windows: [21, 63, 126, 252]
+  volatility_windows: [21, 63, 126]
+  drawdown_windows: [63, 252]
+  moving_average_windows: [50, 200]
+  return_windows: [1, 5, 21]
+  volume_zscore_window: 21
+  compute_cross_sectional_ranks: true
+
+forecast:
+  momentum_window: 252
+  volatility_penalty: 0.25
+  covariance_lookback_days: 252
+  label_horizons: [5, 21, 63]
+
+optimizer:
+  max_weight: 0.05
+  risk_aversion: 10.0
+  min_trade_weight: 0.005
+  lambda_turnover: 0.001
+  solver: null
+
+tableau:
+  export_csv: true
+  export_hyper: false
+  publish_enabled: false
+  prep_output_root: tableau_prep_outputs
+  server_url: https://us-east-1.online.tableau.com
+  site_name: aladelca
+  project_name: Default
+  datasource_name: portfolio_dashboard_mart
+  workbook_name: portfolio_recommendations
+  workbook_output_path: tableau/workbooks/portfolio_recommendations.twb

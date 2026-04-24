@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import BaseModel, Field, field_validator
+
+
+class RunConfig(BaseModel):
+    as_of_date: date | None = None
+    output_root: Path = Path("data")
+    run_id: str | None = None
+
+
+class UniverseConfig(BaseModel):
+    provider: Literal["wikipedia_sp500"] = "wikipedia_sp500"
+    source_url: str = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+
+
+class PriceConfig(BaseModel):
+    provider: Literal["yfinance"] = "yfinance"
+    lookback_years: int = Field(default=5, ge=1, le=30)
+    batch_size: int = Field(default=100, ge=1, le=500)
+    benchmark_tickers: list[str] = Field(default_factory=lambda: ["SPY"])
+
+
+class FeatureConfig(BaseModel):
+    min_history_days: int = Field(default=252, ge=2)
+    momentum_windows: list[int] = Field(default_factory=lambda: [63, 126, 252])
+    volatility_window: int = Field(default=63, ge=2)
+    drawdown_window: int = Field(default=252, ge=2)
+    moving_average_windows: list[int] = Field(default_factory=lambda: [50, 200])
+
+    @field_validator("momentum_windows", "moving_average_windows")
+    @classmethod
+    def _positive_windows(cls, value: list[int]) -> list[int]:
+        if not value or any(window < 2 for window in value):
+            msg = "windows must contain positive values greater than one"
+            raise ValueError(msg)
+        return value
+
+
+class PanelFeatureConfig(BaseModel):
+    min_history_days: int = Field(default=252, ge=2)
+    momentum_windows: list[int] = Field(default_factory=lambda: [21, 63, 126, 252])
+    volatility_windows: list[int] = Field(default_factory=lambda: [21, 63, 126])
+    drawdown_windows: list[int] = Field(default_factory=lambda: [63, 252])
+    moving_average_windows: list[int] = Field(default_factory=lambda: [50, 200])
+    return_windows: list[int] = Field(default_factory=lambda: [1, 5, 21])
+    volume_zscore_window: int = Field(default=21, ge=2)
+    compute_cross_sectional_ranks: bool = True
+
+    @field_validator(
+        "momentum_windows",
+        "volatility_windows",
+        "drawdown_windows",
+        "moving_average_windows",
+        "return_windows",
+    )
+    @classmethod
+    def _positive_windows(cls, value: list[int]) -> list[int]:
+        if not value or any(window < 1 for window in value):
+            msg = "panel feature windows must be positive"
+            raise ValueError(msg)
+        return value
+
+
+class ForecastConfig(BaseModel):
+    momentum_window: int = Field(default=252, ge=2)
+    volatility_penalty: float = Field(default=0.25, ge=0)
+    covariance_lookback_days: int = Field(default=252, ge=2)
+    label_horizons: list[int] = Field(default_factory=lambda: [5, 21, 63])
+
+    @field_validator("label_horizons")
+    @classmethod
+    def _positive_horizons(cls, value: list[int]) -> list[int]:
+        if not value or any(horizon < 1 for horizon in value):
+            msg = "label horizons must be positive"
+            raise ValueError(msg)
+        return value
+
+
+class OptimizerConfig(BaseModel):
+    max_weight: float = Field(default=0.05, gt=0, le=1)
+    risk_aversion: float = Field(default=10.0, ge=0)
+    min_trade_weight: float = Field(default=0.005, ge=0)
+    lambda_turnover: float = Field(default=0.001, ge=0)
+    solver: str | None = None
+
+
+class TableauConfig(BaseModel):
+    export_csv: bool = True
+    export_hyper: bool = False
+    publish_enabled: bool = False
+    prep_output_root: Path = Path("tableau_prep_outputs")
+    server_url: str | None = None
+    site_name: str | None = None
+    project_name: str = "Default"
+    datasource_name: str = "portfolio_dashboard_mart"
+    workbook_name: str = "portfolio_recommendations"
+    workbook_output_path: Path = Path("tableau/workbooks/portfolio_recommendations.twb")
+
+
+class PortfolioConfig(BaseModel):
+    run: RunConfig = Field(default_factory=RunConfig)
+    universe: UniverseConfig = Field(default_factory=UniverseConfig)
+    prices: PriceConfig = Field(default_factory=PriceConfig)
+    features: FeatureConfig = Field(default_factory=FeatureConfig)
+    panel_features: PanelFeatureConfig = Field(default_factory=PanelFeatureConfig)
+    forecast: ForecastConfig = Field(default_factory=ForecastConfig)
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    tableau: TableauConfig = Field(default_factory=TableauConfig)
+
+
+def load_config(path: Path) -> PortfolioConfig:
+    with path.open("r", encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle) or {}
+    return PortfolioConfig.model_validate(raw)

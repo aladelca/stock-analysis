@@ -3,3 +3,32 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# macOS
+.DS_Store
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Local data and generated Tableau outputs
+data/
+tableau_prep_outputs/
+*.hyper
+*.tde
+logs/
+hyperd.log
+
+# Local secrets
+.env
+*.local.yaml
+*.local.json
