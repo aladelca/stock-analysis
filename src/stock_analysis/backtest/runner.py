@@ -20,6 +20,7 @@ class PredictiveModel(Protocol):
 class BacktestConfig:
     horizon_days: int = 5
     training_target_column: str | None = None
+    rebalance_step_days: int = 5
     embargo_days: int = 15
     cost_bps: float = 5.0
     covariance_lookback_days: int = 252
@@ -63,7 +64,19 @@ def run_walk_forward_backtest(
     previous_weights: pd.Series | None = None
     completed_rebalances = 0
 
-    for rebalance_date in rebalance_dates:
+    rebalance_step = max(cfg.rebalance_step_days, 1)
+    candidate_rebalance_dates = rebalance_dates[::rebalance_step]
+    if cfg.max_rebalances is not None and len(candidate_rebalance_dates) > cfg.max_rebalances:
+        sample_positions = np.linspace(
+            0,
+            len(candidate_rebalance_dates) - 1,
+            cfg.max_rebalances,
+        ).round()
+        candidate_rebalance_dates = candidate_rebalance_dates[
+            np.unique(sample_positions.astype(int))
+        ]
+
+    for rebalance_date in candidate_rebalance_dates:
         if cfg.max_rebalances is not None and completed_rebalances >= cfg.max_rebalances:
             break
 

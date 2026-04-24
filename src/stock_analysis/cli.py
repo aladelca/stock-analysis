@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 from rich import print
 
+from stock_analysis.backtest.runner import BacktestConfig
 from stock_analysis.config import load_config
 from stock_analysis.env import load_local_env
 from stock_analysis.logging import configure_logging
@@ -37,6 +38,21 @@ EXPERIMENT_OUTPUT_DIR_OPTION = typer.Option(
     "--output-dir",
     help="Directory where markdown experiment reports are written.",
 )
+MAX_REBALANCES_OPTION = typer.Option(
+    None,
+    "--max-rebalances",
+    help="Limit completed rebalance dates for quicker experiment iterations.",
+)
+MAX_ASSETS_OPTION = typer.Option(
+    None,
+    "--max-assets",
+    help="Limit experiments to the latest most-liquid assets by dollar volume.",
+)
+EXPERIMENTS_OPTION = typer.Option(
+    "E0,E1,E2,E3,E4,E5,E6,E7,E8",
+    "--experiments",
+    help="Comma-separated Phase 2 experiment ids.",
+)
 
 
 @app.command("run-one-shot")
@@ -65,6 +81,11 @@ def run_phase2_command(
     input_run_root: Path = INPUT_RUN_ROOT_OPTION,
     output_dir: Path = EXPERIMENT_OUTPUT_DIR_OPTION,
     force: bool = FORCE_OPTION,
+    max_rebalances: int | None = MAX_REBALANCES_OPTION,
+    max_assets: int | None = MAX_ASSETS_OPTION,
+    experiments: str = EXPERIMENTS_OPTION,
+    no_sweeps: bool = typer.Option(False, "--no-sweeps"),
+    no_nested_cv: bool = typer.Option(False, "--no-nested-cv"),
 ) -> None:
     configure_logging()
     summary = run_phase2(
@@ -72,6 +93,11 @@ def run_phase2_command(
             input_run_root=input_run_root,
             output_dir=output_dir,
             force=force,
+            experiments=tuple(item.strip() for item in experiments.split(",") if item.strip()),
+            max_assets=max_assets,
+            backtest=BacktestConfig(max_rebalances=max_rebalances),
+            run_sweeps=not no_sweeps,
+            lightgbm_nested_cv=not no_nested_cv,
         )
     )
     print("[green]Completed Phase 2 experiment batch[/green]")

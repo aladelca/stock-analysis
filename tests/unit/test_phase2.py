@@ -45,6 +45,7 @@ def test_run_phase2_writes_reports_and_tracking_artifacts(tmp_path) -> None:
                     "date": current_date.date().isoformat(),
                     "fwd_return_5d": 0.01 + ticker_idx * 0.001,
                     "fwd_rank_5d": ticker_idx + 1,
+                    "fwd_is_top_tercile_5d": int(ticker_idx == 2),
                 }
             )
             return_rows.append(
@@ -71,10 +72,12 @@ def test_run_phase2_writes_reports_and_tracking_artifacts(tmp_path) -> None:
             input_run_root=run_root,
             output_dir=tmp_path / "reports",
             tracking_root=tmp_path / "experiments",
-            experiments=("E0", "E1", "E2", "E3", "E4", "E8"),
+            experiments=("E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"),
             bootstrap_samples=10,
             feature_columns=("momentum_21d", "volatility_63d", "return_5d"),
             optimizer=OptimizerConfig(max_weight=0.6, risk_aversion=0.1),
+            run_sweeps=False,
+            lightgbm_nested_cv=False,
             backtest=BacktestConfig(
                 horizon_days=5,
                 embargo_days=10,
@@ -84,7 +87,17 @@ def test_run_phase2_writes_reports_and_tracking_artifacts(tmp_path) -> None:
         )
     )
 
-    assert set(summary["experiment_id"]) == {"E0", "E1", "E2", "E3", "E4", "E8"}
+    assert set(summary["experiment_id"]) == {
+        "E0",
+        "E1",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7",
+        "E8",
+    }
     assert (tmp_path / "reports" / "phase2-report.md").exists()
     assert (tmp_path / "reports" / "e0.md").exists()
     assert (tmp_path / "experiments" / "e0" / "backtest.parquet").exists()
