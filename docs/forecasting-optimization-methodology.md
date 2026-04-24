@@ -1,0 +1,496 @@
+# Forecasting And Optimization Methodology
+
+This document describes the scientific methodology implemented in the current MVP. It is intentionally explicit about what is a forecast, what is only a score, how risk is estimated, and how the portfolio optimization problem is formulated.
+
+## Scope
+
+The current system is a one-shot, end-of-day, long-only S&P 500 portfolio assistant. It does not execute trades. It produces target portfolio weights and Tableau-ready diagnostics from historical adjusted prices.
+
+The implemented methodology has three stages:
+
+1. Price-derived feature construction.
+2. Baseline forecast-score and covariance estimation.
+3. Long-only mean-variance-style portfolio optimization.
+
+## Data Inputs
+
+For each eligible asset `i`, the pipeline uses daily adjusted close prices:
+
+```text
+P_{i,t}
+```
+
+where:
+
+- `i` indexes an asset in the S&P 500 universe.
+- `t` indexes a trading day.
+- `P_{i,t}` is the adjusted close price.
+- The canonical `as_of_date` is the latest available market data date, not the wall-clock run date.
+
+Daily simple returns are computed as:
+
+```text
+r_{i,t} = P_{i,t} / P_{i,t-1} - 1
+```
+
+An asset is eligible for optimization only if it has at least `features.min_history_days` valid adjusted close observations and finite forecast/risk inputs.
+
+Default config:
+
+```yaml
+features:
+  min_history_days: 252
+  momentum_windows: [63, 126, 252]
+  volatility_window: 63
+  drawdown_window: 252
+  moving_average_windows: [50, 200]
+
+forecast:
+  momentum_window: 252
+  volatility_penalty: 0.25
+  covariance_lookback_days: 252
+
+optimizer:
+  max_weight: 0.05
+  risk_aversion: 10.0
+```
+
+## Feature Engineering
+
+### Momentum
+
+For a configured lookback window `L`, momentum is:
+
+```text
+M_{i,L} = P_{i,T} / P_{i,T-L} - 1
+```
+
+where `T` is the latest available price date for the asset.
+
+The default windows are:
+
+```text
+L in {63, 126, 252}
+```
+
+These approximate 3-month, 6-month, and 12-month trading horizons.
+
+### Annualized Volatility
+
+For a volatility window `V`, annualized volatility is:
+
+```text
+sigma_i = std(r_{i,T-V+1:T}) * sqrt(252)
+```
+
+The MVP default uses:
+
+```text
+V = 63
+```
+
+This is a short-horizon volatility estimate, roughly 3 trading months.
+
+### Maximum Drawdown
+
+For a drawdown window `D`, maximum drawdown is:
+
+```text
+DD_i = min_{t in T-D+1:T} (P_{i,t} / max_{s <= t} P_{i,s} - 1)
+```
+
+This is currently computed for diagnostics and future model work. It is not yet used directly in the optimizer objective.
+
+### Moving Average Ratios
+
+For a moving average window `A`:
+
+```text
+MA_{i,A} = mean(P_{i,T-A+1:T})
+```
+
+```text
+PriceToMA_{i,A} = P_{i,T} / MA_{i,A}
+```
+
+These are currently emitted as features for diagnostics and future forecast improvements. They are not yet used directly in the MVP forecast score.
+
+## Forecast Methodology
+
+### Current MVP Forecast Is A Score
+
+The current field is named `expected_return` in the optimizer input, but scientifically it should be interpreted as a forecast score rather than a calibrated expected return.
+
+For each eligible asset `i`, the MVP computes:
+
+```text
+mu_i = M_{i,F} - lambda_vol * sigma_i
+```
+
+where:
+
+- `mu_i` is the forecast score used by the optimizer.
+- `M_{i,F}` is momentum over the configured forecast momentum window.
+- `F = forecast.momentum_window`, default `252`.
+- `sigma_i` is annualized volatility over the configured volatility window.
+- `lambda_vol = forecast.volatility_penalty`, default `0.25`.
+
+With defaults:
+
+```text
+mu_i = momentum_252d_i - 0.25 * volatility_63d_i
+```
+
+Interpretation:
+
+- Positive momentum increases the asset score.
+- High volatility reduces the asset score.
+- The score is cross-sectional and heuristic.
+- It is not yet probability-calibrated.
+- It is not yet a statistically validated return forecast.
+
+### Eligibility Filter
+
+An asset remains eligible only if:
+
+```text
+history_days_i >= min_history_days
+```
+
+```text
+mu_i is finite
+```
+
+```text
+sigma_i is finite and sigma_i > 0
+```
+
+Assets that fail these filters receive zero portfolio weight.
+
+## Risk Model
+
+The risk model uses the empirical covariance matrix of daily returns over the latest `K` trading days:
+
+```text
+K = forecast.covariance_lookback_days
+```
+
+Default:
+
+```text
+K = 252
+```
+
+Let:
+
+```text
+R = matrix of daily returns for eligible assets over the latest K days
+```
+
+The annualized covariance matrix is:
+
+```text
+Sigma = cov(R) * 252
+```
+
+Implementation details:
+
+- Missing returns in the pivoted return matrix are filled with `0`.
+- The covariance matrix is symmetrized before optimization.
+- A small diagonal jitter is added in the optimizer to improve numerical stability:
+
+```text
+Sigma_stable = (Sigma + Sigma^T) / 2 + epsilon * I
+```
+
+where:
+
+```text
+epsilon = 1e-8
+```
+
+## Optimization Model
+
+### Sets And Indices
+
+Let:
+
+```text
+N = number of eligible assets
+i = 1, ..., N
+```
+
+### Parameters
+
+```text
+mu_i
+```
+
+Forecast score for asset `i`.
+
+```text
+Sigma
+```
+
+Annualized covariance matrix of eligible asset returns.
+
+```text
+gamma
+```
+
+Risk aversion parameter:
+
+```text
+gamma = optimizer.risk_aversion
+```
+
+Default:
+
+```text
+gamma = 10.0
+```
+
+```text
+w_max
+```
+
+Maximum allowed allocation per asset:
+
+```text
+w_max = optimizer.max_weight
+```
+
+Default:
+
+```text
+w_max = 0.05
+```
+
+### Decision Variables
+
+The optimizer solves for portfolio weights:
+
+```text
+w_i for i = 1, ..., N
+```
+
+where:
+
+```text
+w_i = fraction of portfolio capital allocated to asset i
+```
+
+In vector notation:
+
+```text
+w = [w_1, w_2, ..., w_N]^T
+```
+
+### Objective Function
+
+The MVP solves a long-only mean-variance-style quadratic optimization problem:
+
+```text
+maximize_w  mu^T w - gamma * w^T Sigma w
+```
+
+Interpretation:
+
+- `mu^T w` rewards assets with higher forecast scores.
+- `w^T Sigma w` penalizes portfolio variance.
+- `gamma` controls the return-score versus risk tradeoff.
+- Larger `gamma` produces a more risk-averse allocation.
+- Smaller `gamma` allows more concentration in high-score assets, subject to constraints.
+
+This is implemented with CVXPY as:
+
+```text
+Maximize(mu @ weights - risk_aversion * quad_form(weights, Sigma))
+```
+
+### Constraints
+
+#### Fully Invested Constraint
+
+```text
+sum_i w_i = 1
+```
+
+The portfolio allocates 100% of available capital.
+
+#### Long-Only Constraint
+
+```text
+w_i >= 0 for all i
+```
+
+Short positions are not allowed.
+
+#### Maximum Single-Asset Weight
+
+```text
+w_i <= w_max for all i
+```
+
+Default:
+
+```text
+w_i <= 0.05
+```
+
+No single asset can receive more than 5% of portfolio weight.
+
+#### Eligibility Constraint
+
+Only assets passing the data-quality and forecast-quality filters are included in the optimization universe.
+
+Equivalently, for ineligible assets `j`:
+
+```text
+w_j = 0
+```
+
+The implementation enforces this by excluding ineligible assets from the optimization problem and assigning them zero weight in recommendations.
+
+#### Minimum Feasible Universe Check
+
+Before solving, the system checks:
+
+```text
+N >= ceil(1 / w_max)
+```
+
+This is required because a fully invested portfolio cannot satisfy `w_i <= w_max` if there are too few eligible assets.
+
+With default `w_max = 0.05`:
+
+```text
+N >= 20
+```
+
+## Solver Behavior
+
+The optimizer attempts available solvers in this order unless a solver is configured:
+
+```text
+CLARABEL
+OSQP
+SCS
+CVXPY default
+```
+
+The problem is convex when `Sigma` is positive semidefinite. The implementation uses `cp.psd_wrap(Sigma)` after symmetrizing and adding diagonal jitter.
+
+After solving, tiny negative numerical weights are clipped to zero and weights are renormalized to sum to one.
+
+## Output Interpretation
+
+### `portfolio_recommendations`
+
+Each row contains:
+
+- `ticker`
+- `security`
+- `gics_sector`
+- `expected_return`
+- `volatility`
+- `target_weight`
+- `action`
+- `reason_code`
+- `as_of_date`
+- `run_id`
+
+Current action logic:
+
+```text
+if target_weight >= min_trade_weight:
+  action = BUY
+else:
+  action = EXCLUDE
+```
+
+Because the MVP does not yet ingest a current portfolio, it does not calculate true sell orders. A future version should compare current holdings against target weights:
+
+```text
+trade_weight_i = target_weight_i - current_weight_i
+```
+
+Then:
+
+```text
+BUY  if trade_weight_i > threshold
+SELL if trade_weight_i < -threshold
+HOLD otherwise
+```
+
+### `portfolio_risk_metrics`
+
+The MVP reports:
+
+```text
+expected_return = mu^T w
+```
+
+```text
+expected_volatility = sqrt(w^T Sigma w)
+```
+
+```text
+num_holdings = count(w_i > 0)
+```
+
+```text
+max_weight = max_i w_i
+```
+
+```text
+concentration_hhi = sum_i w_i^2
+```
+
+Important: `expected_return` is currently based on the heuristic forecast score `mu`, not a calibrated statistical expected return.
+
+### `sector_exposure`
+
+Sector exposure is computed as:
+
+```text
+sector_weight_s = sum_{i in sector s} w_i
+```
+
+There is currently no sector cap constraint. Sector exposure is diagnostic only.
+
+## Scientific Assumptions
+
+The MVP assumes:
+
+- Historical adjusted prices are sufficient for a first baseline model.
+- Medium-term momentum contains useful cross-sectional information.
+- Recent volatility is a meaningful penalty for unstable assets.
+- Empirical covariance over the latest 252 trading days is an acceptable first-pass portfolio risk model.
+- Long-only mean-variance optimization is a reasonable starting point for portfolio construction.
+- A 5% max-weight cap reduces single-name concentration risk.
+
+## Known Limitations
+
+- The forecast score is not calibrated to realized future returns.
+- The model has not yet been backtested walk-forward.
+- Missing returns are filled with zero in the covariance matrix, which can understate risk for sparse assets.
+- There is no transaction cost model.
+- There is no turnover constraint.
+- There is no current portfolio input, so outputs are target allocations rather than executable rebalance trades.
+- There are no sector, industry, beta, or liquidity constraints yet.
+- The covariance matrix uses a simple empirical estimator rather than shrinkage or factor risk modeling.
+- The optimizer can produce tiny numerical weights due to solver tolerance.
+
+## Recommended Next Methodology Improvements
+
+1. Rename `expected_return` to `forecast_score` or add a calibrated `expected_return` field separately.
+2. Add walk-forward backtesting with out-of-sample evaluation.
+3. Add covariance shrinkage, such as Ledoit-Wolf, to improve stability.
+4. Add transaction costs and turnover constraints.
+5. Add current holdings input to generate true buy/sell orders.
+6. Add sector and industry caps.
+7. Add benchmark-relative diagnostics versus SPY or equal-weight S&P 500.
+8. Add robust forecast scaling, winsorization, and feature standardization.
+9. Add confidence intervals or forecast uncertainty bands.
+10. Add model versioning to every forecast and optimization output.
