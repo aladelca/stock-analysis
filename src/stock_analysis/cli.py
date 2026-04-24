@@ -11,6 +11,12 @@ from stock_analysis.backtest.runner import BacktestConfig
 from stock_analysis.config import OptimizerConfig, load_config
 from stock_analysis.env import load_local_env
 from stock_analysis.logging import configure_logging
+from stock_analysis.ml.autoresearch_eval import (
+    AutoresearchEvalConfig,
+    append_result_tsv,
+    evaluate_candidate,
+    result_to_json,
+)
 from stock_analysis.ml.experiments import run_experiment_from_config
 from stock_analysis.ml.phase2 import Phase2Config, run_phase2
 from stock_analysis.pipeline.one_shot import run_one_shot
@@ -63,6 +69,36 @@ OPTIMIZER_MAX_WEIGHT_OPTION = typer.Option(
     None,
     "--optimizer-max-weight",
     help="Override the Phase 2 optimizer max-weight cap.",
+)
+AUTORESEARCH_CANDIDATE_OPTION = typer.Option(
+    "e8_baseline",
+    "--candidate",
+    help="Autoresearch candidate id.",
+)
+AUTORESEARCH_INPUT_RUN_ROOT_OPTION = typer.Option(
+    Path("data/runs/phase2-source-20260424"),
+    "--input-run-root",
+    help="Path to a Phase 1 run root containing silver/gold ML artifacts.",
+)
+AUTORESEARCH_RESULTS_TSV_OPTION = typer.Option(
+    None,
+    "--results-tsv",
+    help="Optional append-only TSV ledger path.",
+)
+AUTORESEARCH_JSON_OUTPUT_OPTION = typer.Option(
+    None,
+    "--json-output",
+    help="Optional path for the full JSON result.",
+)
+AUTORESEARCH_MAX_ASSETS_OPTION = typer.Option(
+    100,
+    "--max-assets",
+    help="Limit to the latest most-liquid assets by liquidity column.",
+)
+AUTORESEARCH_MAX_REBALANCES_OPTION = typer.Option(
+    48,
+    "--max-rebalances",
+    help="Limit completed rebalance dates for faster autoresearch iterations.",
 )
 
 
@@ -127,6 +163,55 @@ def run_phase2_command(
     )
     print("[green]Completed Phase 2 experiment batch[/green]")
     print(summary.drop(columns=["metrics"], errors="ignore").to_string(index=False))
+
+
+@app.command("autoresearch-eval")
+def autoresearch_eval_command(
+    candidate: str = AUTORESEARCH_CANDIDATE_OPTION,
+    input_run_root: Path = AUTORESEARCH_INPUT_RUN_ROOT_OPTION,
+    max_assets: int | None = AUTORESEARCH_MAX_ASSETS_OPTION,
+    max_rebalances: int | None = AUTORESEARCH_MAX_REBALANCES_OPTION,
+    optimizer_max_weight: float = typer.Option(0.30, "--optimizer-max-weight"),
+    risk_aversion: float = typer.Option(10.0, "--risk-aversion"),
+    min_trade_weight: float = typer.Option(0.005, "--min-trade-weight"),
+    lambda_turnover: float = typer.Option(0.001, "--lambda-turnover"),
+    horizon_days: int | None = typer.Option(None, "--horizon-days"),
+    rebalance_step_days: int = typer.Option(5, "--rebalance-step-days"),
+    embargo_days: int = typer.Option(15, "--embargo-days"),
+    cost_bps: float = typer.Option(5.0, "--cost-bps"),
+    covariance_lookback_days: int = typer.Option(252, "--covariance-lookback-days"),
+    liquidity_column: str = typer.Option("dollar_volume_21d", "--liquidity-column"),
+    iteration_id: str | None = typer.Option(None, "--iteration-id"),
+    results_tsv: Path | None = AUTORESEARCH_RESULTS_TSV_OPTION,
+    json_output: Path | None = AUTORESEARCH_JSON_OUTPUT_OPTION,
+) -> None:
+    configure_logging()
+    result = evaluate_candidate(
+        AutoresearchEvalConfig(
+            candidate_id=candidate,
+            input_run_root=input_run_root,
+            max_assets=max_assets,
+            max_rebalances=max_rebalances,
+            optimizer_max_weight=optimizer_max_weight,
+            risk_aversion=risk_aversion,
+            min_trade_weight=min_trade_weight,
+            lambda_turnover=lambda_turnover,
+            horizon_days=horizon_days,
+            rebalance_step_days=rebalance_step_days,
+            embargo_days=embargo_days,
+            cost_bps=cost_bps,
+            covariance_lookback_days=covariance_lookback_days,
+            liquidity_column=liquidity_column,
+            iteration_id=iteration_id,
+        )
+    )
+    if results_tsv is not None:
+        append_result_tsv(results_tsv, result)
+    output = result_to_json(result)
+    if json_output is not None:
+        json_output.parent.mkdir(parents=True, exist_ok=True)
+        json_output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
 
 
 @app.command("export-tableau")
