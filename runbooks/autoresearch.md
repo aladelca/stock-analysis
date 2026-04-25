@@ -82,6 +82,43 @@ Start the local UI with:
 uv run --extra mlflow mlflow ui --backend-store-uri sqlite:///data/mlflow/mlflow.db
 ```
 
+## Contribution-Aware Evaluation
+
+Use this when you want the backtest to model paycheck-style deposits and compare the same cash-flow
+schedule against SPY:
+
+```bash
+uv run --extra mlflow stock-analysis autoresearch-eval \
+  --candidate e8_baseline \
+  --input-run-root data/runs/phase2-source-20260424 \
+  --max-assets 100 \
+  --max-rebalances 48 \
+  --optimizer-max-weight 0.30 \
+  --risk-aversion 10 \
+  --min-trade-weight 0.005 \
+  --lambda-turnover 5.0 \
+  --commission-rate 0.02 \
+  --initial-portfolio-value 1000 \
+  --monthly-deposit-amount 100 \
+  --deposit-frequency-days 30 \
+  --no-trade-band 0.02 \
+  --horizon-days 5 \
+  --rebalance-step-days 5 \
+  --embargo-days 15 \
+  --covariance-lookback-days 252 \
+  --iteration-id e8-contribution-aware-20260424 \
+  --mlflow \
+  --json-output docs/experiments/e8-contribution-aware-20260424.json
+```
+
+Interpret cash-flow fields separately:
+
+- `strategy_time_weighted_return` measures strategy skill independent of deposit timing.
+- `strategy_money_weighted_return` measures the investor-specific return after deposits.
+- `strategy_ending_value` is the dollar result after initial capital, deposits, returns, and commissions.
+- `benchmark_ending_value` applies the same initial capital and deposits to SPY.
+- `active_ending_value` is the strategy ending value minus the SPY same-deposit ending value.
+
 ## Interpreting Results
 
 Primary fields:

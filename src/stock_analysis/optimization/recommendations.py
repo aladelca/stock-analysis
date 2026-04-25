@@ -8,6 +8,7 @@ import pandas as pd
 from stock_analysis.config import OptimizerConfig
 from stock_analysis.domain.schemas import validate_columns
 from stock_analysis.portfolio.holdings import align_current_weights
+from stock_analysis.portfolio.rebalance import RebalanceContext, plan_rebalance_trades
 
 
 def build_recommendations(
@@ -17,18 +18,31 @@ def build_recommendations(
     as_of_date: str,
     run_id: str,
     current_weights: pd.Series | dict[str, float] | None = None,
+    rebalance_context: RebalanceContext | None = None,
+    no_trade_band: float = 0.0,
 ) -> pd.DataFrame:
     result = optimizer_input.copy()
     result["target_weight"] = result["ticker"].map(weights).fillna(0.0).astype(float)
+    aligned_current_weights = (
+        rebalance_context.current_weights
+        if rebalance_context is not None
+        else align_current_weights(
+            current_weights,
+            pd.Index(result["ticker"].astype(str)),
+        )
+    )
     result["current_weight"] = align_current_weights(
-        current_weights,
+        aligned_current_weights,
         pd.Index(result["ticker"].astype(str)),
     ).to_numpy(dtype=float)
     result["_outside_optimizer_universe"] = False
 
+    outside_weights_source = (
+        rebalance_context.current_weights if rebalance_context is not None else current_weights
+    )
     outside_rows = _current_holdings_outside_optimizer_universe(
         optimizer_input,
-        current_weights,
+        outside_weights_source,
     )
     if not outside_rows.empty:
         result = pd.concat([result, outside_rows], ignore_index=True)
@@ -37,17 +51,23 @@ def build_recommendations(
     result["current_weight"] = pd.to_numeric(result["current_weight"], errors="coerce").fillna(0.0)
     result["trade_weight"] = result["target_weight"] - result["current_weight"]
     result["trade_abs_weight"] = result["trade_weight"].abs()
-    result["rebalance_required"] = result["trade_abs_weight"].ge(
-        config.min_rebalance_trade_weight
-    ) & (result["target_weight"].gt(0) | result["current_weight"].gt(0))
+    effective_trade_threshold = max(config.min_rebalance_trade_weight, float(no_trade_band))
+    result["rebalance_required"] = result["trade_abs_weight"].ge(effective_trade_threshold) & (
+        result["target_weight"].gt(0) | result["current_weight"].gt(0)
+    )
     result["action"] = np.select(
         [
-            result["trade_weight"].ge(config.min_rebalance_trade_weight),
-            result["trade_weight"].le(-config.min_rebalance_trade_weight),
+            result["trade_weight"].ge(effective_trade_threshold),
+            result["trade_weight"].le(-effective_trade_threshold),
             result["target_weight"].gt(0) | result["current_weight"].gt(0),
         ],
         ["BUY", "SELL", "HOLD"],
         default="EXCLUDE",
+    )
+    result["no_trade_band_applied"] = (
+        result["trade_abs_weight"].gt(config.min_rebalance_trade_weight)
+        & result["trade_abs_weight"].lt(effective_trade_threshold)
+        & (result["target_weight"].gt(0) | result["current_weight"].gt(0))
     )
     planned_trade = result["action"].isin(["BUY", "SELL"])
     result["estimated_commission_weight"] = np.where(
@@ -70,6 +90,13 @@ def build_recommendations(
         result["action"].eq("SELL"),
         np.maximum(result["trade_abs_weight"] - result["estimated_commission_weight"], 0.0),
         0.0,
+    )
+    result = _attach_rebalance_plan(
+        result,
+        weights,
+        config,
+        rebalance_context,
+        no_trade_band,
     )
     result["current_weight_label"] = result["current_weight"].map(_percent_label)
     result["target_weight_label"] = result["target_weight"].map(_percent_label)
@@ -98,6 +125,16 @@ def build_recommendations(
         "net_trade_weight_after_commission",
         "cash_required_weight",
         "cash_released_weight",
+        "portfolio_value_before_contribution",
+        "contribution_amount",
+        "portfolio_value_after_contribution",
+        "current_market_value",
+        "target_market_value",
+        "trade_notional",
+        "commission_amount",
+        "deposit_used_amount",
+        "cash_after_trade_amount",
+        "no_trade_band_applied",
         "rebalance_required",
         "action",
         "reason_code",
@@ -193,6 +230,87 @@ def _current_holdings_outside_optimizer_universe(
             "_outside_optimizer_universe": True,
         }
     )
+
+
+def _attach_rebalance_plan(
+    result: pd.DataFrame,
+    weights: pd.Series,
+    config: OptimizerConfig,
+    rebalance_context: RebalanceContext | None,
+    no_trade_band: float,
+) -> pd.DataFrame:
+    if rebalance_context is None:
+        return _attach_empty_rebalance_plan(result)
+
+    plan = plan_rebalance_trades(
+        weights,
+        rebalance_context,
+        commission_rate=config.commission_rate,
+        min_trade_weight=config.min_rebalance_trade_weight,
+        no_trade_band=no_trade_band,
+    ).set_index("ticker")
+    enriched = result.copy()
+    for column in [
+        "portfolio_value_before_contribution",
+        "contribution_amount",
+        "portfolio_value_after_contribution",
+        "current_market_value",
+        "target_market_value",
+        "trade_notional",
+        "commission_amount",
+        "deposit_used_amount",
+        "cash_after_trade_amount",
+        "no_trade_band_applied",
+    ]:
+        if column in plan.columns:
+            enriched[column] = enriched["ticker"].map(plan[column])
+
+    portfolio_value_after = rebalance_context.portfolio_value_after_contribution
+    outside = enriched["_outside_optimizer_universe"].fillna(False).astype(bool)
+    if outside.any():
+        enriched.loc[outside, "portfolio_value_before_contribution"] = (
+            rebalance_context.portfolio_value_before_contribution
+        )
+        enriched.loc[outside, "contribution_amount"] = rebalance_context.contribution_amount
+        enriched.loc[outside, "portfolio_value_after_contribution"] = portfolio_value_after
+        enriched.loc[outside, "current_market_value"] = (
+            enriched.loc[outside, "current_weight"] * portfolio_value_after
+        )
+        enriched.loc[outside, "target_market_value"] = 0.0
+        planned_outside = enriched.loc[outside, "action"].isin(["BUY", "SELL"])
+        enriched.loc[outside, "trade_notional"] = np.where(
+            planned_outside,
+            enriched.loc[outside, "trade_weight"] * portfolio_value_after,
+            0.0,
+        )
+        enriched.loc[outside, "commission_amount"] = (
+            enriched.loc[outside, "trade_notional"].abs() * config.commission_rate
+        )
+        enriched.loc[outside, "deposit_used_amount"] = 0.0
+        enriched.loc[outside, "cash_after_trade_amount"] = pd.NA
+        enriched.loc[outside, "no_trade_band_applied"] = False
+
+    return _attach_empty_rebalance_plan(enriched)
+
+
+def _attach_empty_rebalance_plan(result: pd.DataFrame) -> pd.DataFrame:
+    defaults: dict[str, object] = {
+        "portfolio_value_before_contribution": pd.NA,
+        "contribution_amount": 0.0,
+        "portfolio_value_after_contribution": pd.NA,
+        "current_market_value": pd.NA,
+        "target_market_value": pd.NA,
+        "trade_notional": pd.NA,
+        "commission_amount": pd.NA,
+        "deposit_used_amount": 0.0,
+        "cash_after_trade_amount": pd.NA,
+        "no_trade_band_applied": False,
+    }
+    enriched = result.copy()
+    for column, default in defaults.items():
+        if column not in enriched.columns:
+            enriched[column] = pd.Series(default, index=enriched.index)
+    return enriched
 
 
 def _reason_codes(result: pd.DataFrame) -> pd.Series:

@@ -39,6 +39,11 @@ def main() -> int:
         default=0.02,
         help="Commission rate applied to absolute traded notional.",
     )
+    parser.add_argument("--max-trade-abs-weight", type=float, default=None)
+    parser.add_argument("--initial-portfolio-value", type=float, default=1000.0)
+    parser.add_argument("--monthly-deposit-amount", type=float, default=0.0)
+    parser.add_argument("--deposit-frequency-days", type=int, default=30)
+    parser.add_argument("--no-trade-band", type=float, default=0.0)
     parser.add_argument("--horizon-days", type=int, default=None)
     parser.add_argument("--rebalance-step-days", type=int, default=5)
     parser.add_argument("--embargo-days", type=int, default=15)
@@ -86,6 +91,11 @@ def main() -> int:
             min_trade_weight=args.min_trade_weight,
             lambda_turnover=args.lambda_turnover,
             commission_rate=args.commission_rate,
+            max_trade_abs_weight=args.max_trade_abs_weight,
+            initial_portfolio_value=args.initial_portfolio_value,
+            monthly_deposit_amount=args.monthly_deposit_amount,
+            deposit_frequency_days=args.deposit_frequency_days,
+            no_trade_band=args.no_trade_band,
             horizon_days=args.horizon_days,
             rebalance_step_days=args.rebalance_step_days,
             embargo_days=args.embargo_days,

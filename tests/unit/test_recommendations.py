@@ -9,6 +9,8 @@ from stock_analysis.optimization.recommendations import (
     build_risk_metrics,
     build_sector_exposure,
 )
+from stock_analysis.portfolio.holdings import PortfolioState
+from stock_analysis.portfolio.rebalance import build_rebalance_context
 
 
 def test_recommendation_outputs() -> None:
@@ -85,3 +87,70 @@ def test_recommendation_hold_and_exclude_actions() -> None:
     assert by_ticker.loc["AAA", "action"] == "HOLD"
     assert by_ticker.loc["BBB", "action"] == "HOLD"
     assert by_ticker.loc["CCC", "action"] == "EXCLUDE"
+
+
+def test_recommendations_include_contribution_dollar_fields() -> None:
+    optimizer_input = pd.DataFrame(
+        {
+            "ticker": ["AAA", "BBB"],
+            "security": ["AAA Corp", "BBB Inc"],
+            "gics_sector": ["Technology", "Health Care"],
+            "expected_return": [0.1, 0.2],
+            "volatility": [0.2, 0.3],
+            "eligible_for_optimization": [True, True],
+        }
+    )
+    weights = pd.Series([0.5, 0.5], index=["AAA", "BBB"])
+    context = build_rebalance_context(
+        PortfolioState(
+            weights=pd.Series({"AAA": 0.5, "BBB": 0.3}),
+            market_values=pd.Series({"AAA": 500.0, "BBB": 300.0}),
+            cash_balance=200.0,
+            portfolio_value=1000.0,
+        ),
+        ["AAA", "BBB"],
+        contribution_amount=100.0,
+    )
+
+    recommendations = build_recommendations(
+        optimizer_input,
+        weights,
+        OptimizerConfig(max_weight=0.6, commission_rate=0.02),
+        "2026-04-24",
+        "run-1",
+        rebalance_context=context,
+    )
+
+    by_ticker = recommendations.set_index("ticker")
+    assert by_ticker.loc["BBB", "action"] == "BUY"
+    assert by_ticker.loc["BBB", "trade_notional"] == pytest.approx(250.0)
+    assert by_ticker.loc["BBB", "commission_amount"] == pytest.approx(5.0)
+    assert by_ticker.loc["BBB", "portfolio_value_after_contribution"] == pytest.approx(1100)
+    assert by_ticker.loc["BBB", "deposit_used_amount"] > 0
+
+
+def test_no_trade_band_converts_small_trades_to_hold() -> None:
+    optimizer_input = pd.DataFrame(
+        {
+            "ticker": ["AAA", "BBB"],
+            "security": ["AAA Corp", "BBB Inc"],
+            "gics_sector": ["Technology", "Health Care"],
+            "expected_return": [0.1, 0.2],
+            "volatility": [0.2, 0.3],
+            "eligible_for_optimization": [True, True],
+        }
+    )
+    weights = pd.Series([0.51, 0.49], index=["AAA", "BBB"])
+
+    recommendations = build_recommendations(
+        optimizer_input,
+        weights,
+        OptimizerConfig(max_weight=0.6, min_rebalance_trade_weight=0.005),
+        "2026-04-24",
+        "run-1",
+        current_weights=pd.Series({"AAA": 0.5, "BBB": 0.5}),
+        no_trade_band=0.02,
+    )
+
+    assert set(recommendations["action"]) == {"HOLD"}
+    assert recommendations["no_trade_band_applied"].all()

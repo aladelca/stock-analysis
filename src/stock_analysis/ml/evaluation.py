@@ -7,6 +7,8 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
+from stock_analysis.backtest.cashflows import simulate_benchmark_value_path
+
 
 @dataclass(frozen=True)
 class EvaluationConfig:
@@ -129,6 +131,61 @@ def benchmark_relative_metrics(
         "benchmark_mean_return_period": float(x.mean()),
         "observations": float(len(merged)),
     }
+
+
+def contribution_cashflow_metrics(
+    backtest: pd.DataFrame,
+    benchmark_returns: pd.DataFrame | None = None,
+) -> dict[str, float]:
+    if backtest.empty or "portfolio_value_end" not in backtest.columns:
+        return {}
+
+    periods = (
+        backtest.drop_duplicates("rebalance_date")
+        .sort_values("rebalance_date")
+        .reset_index(drop=True)
+    )
+    last = periods.iloc[-1]
+    metrics: dict[str, float] = {
+        "strategy_ending_value": float(last["strategy_ending_value"]),
+        "strategy_total_deposits": float(last["total_deposits"]),
+        "strategy_total_commissions": float(last["total_commissions"]),
+        "strategy_time_weighted_return": float(last["cumulative_twr_return"]),
+        "strategy_total_return_on_invested_capital": float(
+            last["total_return_on_invested_capital"]
+        ),
+    }
+    money_weighted = _finite_or_none(last.get("money_weighted_return"))
+    if money_weighted is not None:
+        metrics["strategy_money_weighted_return"] = money_weighted
+    commission_ratio = _finite_or_none(last.get("commission_to_deposit_ratio"))
+    if commission_ratio is not None:
+        metrics["strategy_commission_to_deposit_ratio"] = commission_ratio
+
+    if benchmark_returns is not None and not benchmark_returns.empty:
+        benchmark = _benchmark_period_frame(periods, benchmark_returns)
+        contribution_by_date = {
+            pd.Timestamp(row["rebalance_date"]): float(row["external_contribution"])
+            for _, row in periods.iterrows()
+        }
+        benchmark_metrics = simulate_benchmark_value_path(
+            benchmark,
+            initial_value=float(periods["portfolio_value_start"].iloc[0]),
+            contribution_by_date=contribution_by_date,
+            commission_rate=float(periods["commission_rate"].iloc[0]),
+        )
+        for key, value in benchmark_metrics.items():
+            if value is not None:
+                metrics[key] = float(value)
+        if "benchmark_ending_value" in metrics:
+            metrics["active_ending_value"] = (
+                metrics["strategy_ending_value"] - metrics["benchmark_ending_value"]
+            )
+        if "benchmark_time_weighted_return" in metrics:
+            metrics["active_time_weighted_return"] = (
+                metrics["strategy_time_weighted_return"] - metrics["benchmark_time_weighted_return"]
+            )
+    return {key: value for key, value in metrics.items() if np.isfinite(value)}
 
 
 def deflated_sharpe_ratio(
@@ -260,6 +317,27 @@ def _coerce_config(config: EvaluationConfig | dict[str, Any] | None) -> Evaluati
     if isinstance(config, EvaluationConfig):
         return config
     return EvaluationConfig(**config)
+
+
+def _benchmark_period_frame(periods: pd.DataFrame, benchmark_returns: pd.DataFrame) -> pd.DataFrame:
+    benchmark = benchmark_returns.copy()
+    benchmark["date"] = pd.to_datetime(benchmark["date"])
+    benchmark_col = _first_existing_column(benchmark, ["benchmark_return", "spy_return"])
+    if benchmark_col is None:
+        return pd.DataFrame()
+    period_dates = pd.DataFrame({"date": pd.to_datetime(periods["rebalance_date"])})
+    return period_dates.merge(
+        benchmark[["date", benchmark_col]].rename(columns={benchmark_col: "benchmark_return"}),
+        on="date",
+        how="inner",
+    ).dropna()
+
+
+def _finite_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    result = float(value)
+    return result if np.isfinite(result) else None
 
 
 def _first_existing_column(frame: pd.DataFrame, candidates: list[str]) -> str | None:

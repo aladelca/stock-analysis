@@ -1,4 +1,4 @@
-ticker,current_weight
-AAPL,0.08
-MSFT,0.07
-NVDA,0.05
+ticker,market_value
+AAPL,800
+MSFT,700
+NVDA,500

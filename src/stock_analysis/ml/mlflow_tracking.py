@@ -183,6 +183,7 @@ def _metrics_for_result(result: dict[str, Any]) -> dict[str, float]:
         "spy": result.get("metrics", {}).get("spy", {}),
         "benchmark_relative": result.get("metrics", {}).get("benchmark_relative", {}),
         "comparison": result.get("metrics", {}).get("comparison", {}),
+        "cashflow": result.get("metrics", {}).get("cashflow", {}),
         "baseline": result.get("baseline", {}),
     }
     metrics: dict[str, float] = {}
@@ -209,7 +210,10 @@ def _params_for_portfolio_run(
                 if config.portfolio_state.current_holdings_path is not None
                 else None
             ),
+            "portfolio_value": config.portfolio_state.portfolio_value,
         },
+        "contributions": config.contributions.model_dump(mode="json"),
+        "execution": config.execution.model_dump(mode="json"),
         "run_metadata": {
             "config_hash": metadata.get("config_hash"),
             "universe_count": metadata.get("universe_count"),
@@ -265,6 +269,18 @@ def _metrics_for_portfolio_run(
         metrics["recommendations.cash_released_weight"] = _sum_metric(
             recommendations.loc[planned],
             "cash_released_weight",
+        )
+        metrics["recommendations.trade_notional"] = _sum_metric(
+            recommendations.loc[planned],
+            "trade_notional",
+        )
+        metrics["recommendations.commission_amount"] = _sum_metric(
+            recommendations.loc[planned],
+            "commission_amount",
+        )
+        metrics["recommendations.deposit_used_amount"] = _sum_metric(
+            recommendations.loc[planned],
+            "deposit_used_amount",
         )
     return {key: value for key, value in metrics.items() if np.isfinite(value)}
 

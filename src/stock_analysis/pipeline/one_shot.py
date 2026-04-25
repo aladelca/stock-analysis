@@ -34,7 +34,8 @@ from stock_analysis.optimization.recommendations import (
     build_sector_exposure,
 )
 from stock_analysis.paths import ProjectPaths
-from stock_analysis.portfolio.holdings import load_current_weights
+from stock_analysis.portfolio.holdings import PortfolioState, load_portfolio_state
+from stock_analysis.portfolio.rebalance import build_rebalance_context
 from stock_analysis.tableau.dashboard_mart import build_dashboard_mart
 from stock_analysis.tableau.hyper import export_hyper_if_available
 
@@ -160,7 +161,16 @@ def run_one_shot(
     write_csv(optimizer_input, paths.csv_mirror_path("gold", "optimizer_input"))
     covariance.to_parquet(paths.gold_path("covariance_matrix"))
 
-    current_weights = load_current_weights(config.portfolio_state.current_holdings_path)
+    portfolio_state = _load_portfolio_state(config)
+    context_tickers = _rebalance_context_tickers(optimizer_input, portfolio_state)
+    rebalance_context = build_rebalance_context(
+        portfolio_state,
+        context_tickers,
+        contribution_amount=config.contributions.monthly_deposit_amount,
+    )
+    current_weights = rebalance_context.current_weights.reindex(
+        optimizer_input["ticker"].astype(str)
+    ).fillna(0.0)
     weights = optimize_long_only(
         optimizer_input,
         covariance,
@@ -174,6 +184,8 @@ def run_one_shot(
         data_as_of_date_str,
         run_id,
         current_weights=current_weights,
+        rebalance_context=rebalance_context,
+        no_trade_band=config.execution.no_trade_band,
     )
     risk_metrics = build_risk_metrics(
         optimizer_input,
@@ -255,6 +267,33 @@ def run_one_shot(
 def _write_gold_with_csv(paths: ProjectPaths, name: str, df: pd.DataFrame) -> None:
     write_parquet(df, paths.gold_path(name))
     write_csv(df, paths.csv_mirror_path("gold", name))
+
+
+def _load_portfolio_state(config: PortfolioConfig) -> PortfolioState:
+    state = load_portfolio_state(
+        config.portfolio_state.current_holdings_path,
+        cash_balance=config.execution.cash_balance,
+        portfolio_value=config.portfolio_state.portfolio_value,
+    )
+    if state.resolved_portfolio_value is not None:
+        return state
+    return load_portfolio_state(
+        config.portfolio_state.current_holdings_path,
+        cash_balance=config.execution.cash_balance,
+        portfolio_value=config.contributions.initial_portfolio_value,
+    )
+
+
+def _rebalance_context_tickers(
+    optimizer_input: pd.DataFrame,
+    portfolio_state: PortfolioState,
+) -> pd.Index:
+    tickers = optimizer_input["ticker"].astype(str).tolist()
+    if not portfolio_state.weights.empty:
+        tickers.extend(portfolio_state.weights.index.astype(str).tolist())
+    if not portfolio_state.market_values.empty:
+        tickers.extend(portfolio_state.market_values.index.astype(str).tolist())
+    return pd.Index(list(dict.fromkeys(tickers)), name="ticker")
 
 
 def _build_run_metadata(

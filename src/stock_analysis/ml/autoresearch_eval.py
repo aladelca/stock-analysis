@@ -22,6 +22,7 @@ from stock_analysis.ml.autoresearch_candidate import (
 from stock_analysis.ml.evaluation import (
     EvaluationConfig,
     benchmark_relative_metrics,
+    contribution_cashflow_metrics,
     portfolio_metrics,
 )
 
@@ -50,6 +51,14 @@ RESULT_COLUMNS: tuple[str, ...] = (
     "information_ratio",
     "max_drawdown",
     "mean_turnover",
+    "strategy_ending_value",
+    "benchmark_ending_value",
+    "active_ending_value",
+    "strategy_time_weighted_return",
+    "benchmark_time_weighted_return",
+    "strategy_money_weighted_return",
+    "strategy_total_deposits",
+    "strategy_total_commissions",
     "ir_observations",
     "status",
     "notes",
@@ -78,6 +87,7 @@ class AutoresearchEvalConfig:
     min_trade_weight: float = 0.005
     lambda_turnover: float = 5.0
     commission_rate: float = 0.02
+    max_trade_abs_weight: float | None = None
     horizon_days: int | None = None
     rebalance_step_days: int = 5
     embargo_days: int = 15
@@ -85,6 +95,10 @@ class AutoresearchEvalConfig:
     covariance_lookback_days: int = 252
     liquidity_column: str = "dollar_volume_21d"
     iteration_id: str | None = None
+    initial_portfolio_value: float = 1000.0
+    monthly_deposit_amount: float = 0.0
+    deposit_frequency_days: int = 30
+    no_trade_band: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -112,6 +126,7 @@ def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
             min_trade_weight=config.min_trade_weight,
             lambda_turnover=config.lambda_turnover,
             commission_rate=config.commission_rate,
+            max_trade_abs_weight=config.max_trade_abs_weight,
         ),
         BacktestConfig(
             horizon_days=horizon_days,
@@ -123,6 +138,10 @@ def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
             covariance_lookback_days=config.covariance_lookback_days,
             feature_columns=feature_columns,
             max_rebalances=config.max_rebalances,
+            initial_portfolio_value=config.initial_portfolio_value,
+            monthly_deposit_amount=config.monthly_deposit_amount,
+            deposit_frequency_days=config.deposit_frequency_days,
+            no_trade_band=config.no_trade_band,
         ),
     )
     if backtest.empty:
@@ -146,6 +165,10 @@ def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
     )
     ci = sharpe_difference_ci(portfolio_returns, spy_returns)
     comparison = _comparison_metrics(portfolio, spy, benchmark_relative, ci, backtest)
+    cashflow = contribution_cashflow_metrics(
+        backtest,
+        benchmark.rename(columns={"spy_return": "benchmark_return"}),
+    )
     decision = decide_candidate(comparison)
     return {
         "timestamp_utc": datetime.now(UTC).isoformat(),
@@ -164,6 +187,7 @@ def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
             "spy": spy,
             "benchmark_relative": benchmark_relative,
             "comparison": comparison,
+            "cashflow": cashflow,
         },
         "baseline": BASELINE_METRICS,
         "decision": decision,
@@ -200,6 +224,10 @@ def evaluate_turnover_sweep(config: TurnoverSweepConfig) -> dict[str, Any]:
             "max_assets": config.base.max_assets,
             "max_rebalances": config.base.max_rebalances,
             "commission_rate": config.base.commission_rate,
+            "initial_portfolio_value": config.base.initial_portfolio_value,
+            "monthly_deposit_amount": config.base.monthly_deposit_amount,
+            "deposit_frequency_days": config.base.deposit_frequency_days,
+            "no_trade_band": config.base.no_trade_band,
             "penalties": list(config.penalties),
         },
         "details": details,
@@ -304,6 +332,7 @@ def append_result_tsv(path: Path, result: dict[str, Any]) -> None:
 
 def result_to_tsv_row(result: dict[str, Any]) -> dict[str, object]:
     metrics = result.get("metrics", {}).get("comparison", {})
+    cashflow = result.get("metrics", {}).get("cashflow", {})
     config = result.get("config", {})
     decision = result.get("decision", {})
     candidate = result.get("candidate", {})
@@ -330,6 +359,14 @@ def result_to_tsv_row(result: dict[str, Any]) -> dict[str, object]:
         "information_ratio": metrics.get("information_ratio", ""),
         "max_drawdown": metrics.get("max_drawdown", ""),
         "mean_turnover": metrics.get("mean_turnover", ""),
+        "strategy_ending_value": cashflow.get("strategy_ending_value", ""),
+        "benchmark_ending_value": cashflow.get("benchmark_ending_value", ""),
+        "active_ending_value": cashflow.get("active_ending_value", ""),
+        "strategy_time_weighted_return": cashflow.get("strategy_time_weighted_return", ""),
+        "benchmark_time_weighted_return": cashflow.get("benchmark_time_weighted_return", ""),
+        "strategy_money_weighted_return": cashflow.get("strategy_money_weighted_return", ""),
+        "strategy_total_deposits": cashflow.get("strategy_total_deposits", ""),
+        "strategy_total_commissions": cashflow.get("strategy_total_commissions", ""),
         "ir_observations": metrics.get("ir_observations", ""),
         "status": decision.get("status", ""),
         "notes": decision.get("notes", ""),
@@ -466,6 +503,7 @@ def _turnover_sweep_row(
     commission_rate: float,
 ) -> dict[str, object]:
     comparison = result.get("metrics", {}).get("comparison", {})
+    cashflow = result.get("metrics", {}).get("cashflow", {})
     portfolio = result.get("metrics", {}).get("portfolio", {})
     decision = result.get("decision", {})
     observations = _finite_or_none(comparison.get("ir_observations"))
@@ -499,6 +537,11 @@ def _turnover_sweep_row(
         "mean_turnover": mean_turnover,
         "mean_abs_trade_weight": mean_abs_trade_weight,
         "commission_drag_per_rebalance": commission_drag,
+        "strategy_ending_value": _finite_or_none(cashflow.get("strategy_ending_value")),
+        "benchmark_ending_value": _finite_or_none(cashflow.get("benchmark_ending_value")),
+        "active_ending_value": _finite_or_none(cashflow.get("active_ending_value")),
+        "strategy_total_deposits": _finite_or_none(cashflow.get("strategy_total_deposits")),
+        "strategy_total_commissions": _finite_or_none(cashflow.get("strategy_total_commissions")),
         "ir_observations": observations,
         "notes": decision.get("notes", ""),
     }
@@ -555,11 +598,16 @@ def _config_payload(config: AutoresearchEvalConfig, horizon_days: int) -> dict[s
         "min_trade_weight": config.min_trade_weight,
         "lambda_turnover": config.lambda_turnover,
         "commission_rate": config.commission_rate,
+        "max_trade_abs_weight": config.max_trade_abs_weight,
         "horizon_days": horizon_days,
         "rebalance_step_days": config.rebalance_step_days,
         "embargo_days": config.embargo_days,
         "cost_bps": config.cost_bps,
         "covariance_lookback_days": config.covariance_lookback_days,
+        "initial_portfolio_value": config.initial_portfolio_value,
+        "monthly_deposit_amount": config.monthly_deposit_amount,
+        "deposit_frequency_days": config.deposit_frequency_days,
+        "no_trade_band": config.no_trade_band,
     }
 
 

@@ -1,0 +1,138 @@
+{
+  "baseline": {
+    "active_return": 0.636036,
+    "candidate_id": "phase2_e8_final",
+    "candidate_sharpe": 2.987197,
+    "information_ratio": 2.212435,
+    "sharpe_diff": 1.856512,
+    "sharpe_diff_ci_high": 1.5416748795037905,
+    "sharpe_diff_ci_low": -0.4455413268214286,
+    "spy_sharpe": 1.130685
+  },
+  "candidate": {
+    "candidate_id": "e8_baseline",
+    "description": "Current Phase 2 E8 Ridge plus LightGBM regression blend.",
+    "feature_columns": [
+      "momentum_21d",
+      "momentum_63d",
+      "momentum_126d",
+      "momentum_252d",
+      "momentum_21d_rank",
+      "momentum_63d_rank",
+      "momentum_126d_rank",
+      "momentum_252d_rank",
+      "volatility_21d",
+      "volatility_63d",
+      "volatility_126d",
+      "max_drawdown_63d",
+      "max_drawdown_252d",
+      "ma_ratio_50d",
+      "ma_ratio_200d",
+      "return_5d",
+      "return_21d",
+      "dollar_volume_21d",
+      "volume_21d_zscore",
+      "return_21d_excess"
+    ],
+    "model_kind": "e8_blend",
+    "training_target_column": null
+  },
+  "config": {
+    "commission_rate": 0.02,
+    "cost_bps": 5.0,
+    "covariance_lookback_days": 252,
+    "deposit_frequency_days": 30,
+    "embargo_days": 15,
+    "horizon_days": 5,
+    "initial_portfolio_value": 1000.0,
+    "input_run_root": "data/runs/phase2-source-20260424",
+    "lambda_turnover": 5.0,
+    "max_assets": 100,
+    "max_rebalances": 48,
+    "max_trade_abs_weight": null,
+    "min_trade_weight": 0.005,
+    "monthly_deposit_amount": 100.0,
+    "no_trade_band": 0.02,
+    "optimizer_max_weight": 0.3,
+    "rebalance_step_days": 5,
+    "risk_aversion": 10.0
+  },
+  "decision": {
+    "notes": "candidate Sharpe does not beat SPY Sharpe",
+    "objective_improved": false,
+    "passed_spy_gate": false,
+    "status": "rejected"
+  },
+  "git_commit": "f3c45e91f92676b9699ccfd81355baf749a5b1e0",
+  "iteration_id": "e8-contribution-aware-20260424",
+  "metrics": {
+    "benchmark_relative": {
+      "active_return": 0.1386308185204583,
+      "active_return_period": 0.002772616370409166,
+      "alpha": 0.009403258067287043,
+      "benchmark_mean_return_period": 0.0033694972584622533,
+      "beta": 1.7670435708390935,
+      "information_ratio": 0.5211969152012198,
+      "observations": 46.0,
+      "portfolio_mean_return_period": 0.006142113628871417,
+      "tracking_error": 0.2659854931546108,
+      "tracking_error_period": 0.03761602918137466
+    },
+    "cashflow": {
+      "active_ending_value": 519.6436304291692,
+      "active_time_weighted_return": 0.09739990983272606,
+      "benchmark_commission_to_deposit_ratio": 0.02425531914893617,
+      "benchmark_ending_value": 6151.760027032076,
+      "benchmark_money_weighted_return": 0.0342701295324743,
+      "benchmark_time_weighted_return": 0.1554771929583798,
+      "benchmark_total_commissions": 114.0,
+      "benchmark_total_deposits": 4700.0,
+      "benchmark_total_return_on_invested_capital": 0.07925614509334666,
+      "strategy_commission_to_deposit_ratio": 0.06727176940329682,
+      "strategy_ending_value": 6671.4036574612455,
+      "strategy_money_weighted_return": 0.07110801352610888,
+      "strategy_time_weighted_return": 0.25287710279110587,
+      "strategy_total_commissions": 316.17731619549505,
+      "strategy_total_deposits": 4700.0,
+      "strategy_total_return_on_invested_capital": 0.1704216942914465
+    },
+    "comparison": {
+      "active_return": 0.1386308185204583,
+      "annualized_return": 0.27768045835037913,
+      "candidate_sharpe": 0.7758599350280265,
+      "information_ratio": 0.5211969152012198,
+      "ir_observations": 46.0,
+      "max_drawdown": -0.17448585935026162,
+      "mean_turnover": 0.057840821203887824,
+      "sharpe_diff": -0.3548255507482253,
+      "sharpe_diff_ci_high": 0.5228188954972515,
+      "sharpe_diff_ci_low": -1.0420615913307578,
+      "spy_sharpe": 1.1306854857762518,
+      "tracking_error": 0.2659854931546108
+    },
+    "portfolio": {
+      "annualized_return": 0.27768045835037913,
+      "annualized_volatility": 0.3579002418011808,
+      "calmar": 1.5914209861153588,
+      "deflated_sharpe_ratio": 0.7758599350280265,
+      "hit_rate": 0.4782608695652174,
+      "max_drawdown": -0.17448585935026162,
+      "sharpe": 0.7758599350280265
+    },
+    "spy": {
+      "annualized_return": 0.17008897911183207,
+      "annualized_volatility": 0.15042996593792882,
+      "calmar": 1.4245060659816915,
+      "deflated_sharpe_ratio": 1.1306854857762518,
+      "hit_rate": 0.6739130434782609,
+      "max_drawdown": -0.11940207428644123,
+      "sharpe": 1.1306854857762518
+    }
+  },
+  "mlflow": {
+    "experiment_name": "stock-analysis-autoresearch",
+    "run_id": "9389faa1ef314962ba3df487b0900d09",
+    "tracking_uri": "sqlite:///data/mlflow/mlflow.db"
+  },
+  "timestamp_utc": "2026-04-24T21:48:52.449836+00:00"
+}

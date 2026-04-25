@@ -51,10 +51,23 @@ optimizer:
   lambda_turnover: 5.0
   commission_rate: 0.02
   sector_max_weight: 0.35
+  max_trade_abs_weight: null
   solver: null
 
 portfolio_state:
   current_holdings_path: null
+  portfolio_value: null
+
+contributions:
+  initial_portfolio_value: 1000.0
+  monthly_deposit_amount: 0.0
+  deposit_frequency_days: 30
+  deposit_start_date: null
+  rebalance_on_deposit_day: true
+
+execution:
+  cash_balance: 0.0
+  no_trade_band: 0.0
 
 tableau:
   export_csv: true

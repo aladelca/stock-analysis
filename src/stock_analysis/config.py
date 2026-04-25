@@ -98,11 +98,26 @@ class OptimizerConfig(BaseModel):
     lambda_turnover: float = Field(default=5.0, ge=0)
     commission_rate: float = Field(default=0.02, ge=0, le=1)
     sector_max_weight: float | None = Field(default=None, gt=0, le=1)
+    max_trade_abs_weight: float | None = Field(default=None, ge=0, le=2)
     solver: str | None = None
 
 
 class PortfolioStateConfig(BaseModel):
     current_holdings_path: Path | None = None
+    portfolio_value: float | None = Field(default=None, gt=0)
+
+
+class ContributionConfig(BaseModel):
+    initial_portfolio_value: float = Field(default=1000.0, gt=0)
+    monthly_deposit_amount: float = Field(default=0.0, ge=0)
+    deposit_frequency_days: int = Field(default=30, ge=1)
+    deposit_start_date: date | None = None
+    rebalance_on_deposit_day: bool = True
+
+
+class ExecutionConfig(BaseModel):
+    cash_balance: float = Field(default=0.0, ge=0)
+    no_trade_band: float = Field(default=0.0, ge=0, le=1)
 
 
 class TableauConfig(BaseModel):
@@ -133,6 +148,8 @@ class PortfolioConfig(BaseModel):
     forecast: ForecastConfig = Field(default_factory=ForecastConfig)
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     portfolio_state: PortfolioStateConfig = Field(default_factory=PortfolioStateConfig)
+    contributions: ContributionConfig = Field(default_factory=ContributionConfig)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     tableau: TableauConfig = Field(default_factory=TableauConfig)
     mlflow: MLflowConfig = Field(default_factory=MLflowConfig)
 

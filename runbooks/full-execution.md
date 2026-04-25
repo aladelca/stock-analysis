@@ -86,6 +86,16 @@ optimizer:
 
 portfolio_state:
   current_holdings_path: null
+  portfolio_value: null
+
+contributions:
+  initial_portfolio_value: 1000.0
+  monthly_deposit_amount: 0.0
+  deposit_frequency_days: 30
+
+execution:
+  cash_balance: 0.0
+  no_trade_band: 0.0
 
 mlflow:
   enabled: true
@@ -104,13 +114,15 @@ Notes:
 - Gold `as_of_date` is the latest available price date, not necessarily today.
 - `run_id: null` lets the pipeline generate a UTC run id.
 - `portfolio_state.current_holdings_path: null` means first-allocation mode.
+- `contributions.monthly_deposit_amount: 0.0` disables deposit modeling for the one-shot run.
+- `execution.no_trade_band: 0.0` means trades are filtered only by `min_rebalance_trade_weight`.
 - `optimizer.commission_rate: 0.02` charges 2% of absolute traded portfolio weight.
 - `mlflow.enabled: true` logs parameters, recommendation metrics, risk metrics, and gold artifacts.
 - Set `tableau.export_hyper: true` only after installing the Tableau extra.
 
 ## 5. Optional Current Holdings Input
 
-If you already have a portfolio, create a holdings file with decimal portfolio weights:
+If you already have a portfolio, create a holdings file with market values:
 
 ```bash
 cp -f configs/current_holdings.example.csv configs/current_holdings.local.csv
@@ -119,10 +131,10 @@ cp -f configs/current_holdings.example.csv configs/current_holdings.local.csv
 Edit `configs/current_holdings.local.csv`:
 
 ```csv
-ticker,current_weight
-AAPL,0.08
-MSFT,0.07
-NVDA,0.05
+ticker,market_value
+AAPL,800
+MSFT,700
+NVDA,500
 ```
 
 Then set:
@@ -143,6 +155,23 @@ ticker,market_value
 If `market_value` is supplied, the pipeline normalizes values into weights. If no holdings file is
 configured, the run answers "how to allocate new money" rather than "what to trade from my current
 book."
+
+To model a one-shot deposit, set the contribution amount:
+
+```yaml
+contributions:
+  initial_portfolio_value: 1000.0
+  monthly_deposit_amount: 100.0
+  deposit_frequency_days: 30
+
+execution:
+  cash_balance: 0.0
+  no_trade_band: 0.02
+```
+
+When using a fixed-dollar deposit, provide either `market_value` holdings or an explicit
+`portfolio_state.portfolio_value`. The recommendation weights and commission dollars are computed
+on the post-deposit portfolio value.
 
 ## 6. Run The One-Shot Pipeline
 
@@ -230,6 +259,9 @@ print("weight sum:", recs["target_weight"].sum())
 print("current weight sum:", recs["current_weight"].sum())
 print("trade abs weight:", recs.loc[recs["rebalance_required"], "trade_abs_weight"].sum())
 print("estimated commission:", recs["estimated_commission_weight"].sum())
+print("commission amount:", recs["commission_amount"].sum())
+print("contribution:", recs["contribution_amount"].max())
+print("post-contribution value:", recs["portfolio_value_after_contribution"].max())
 print("max weight:", recs["target_weight"].max())
 '
 ```
@@ -240,6 +272,7 @@ Expected:
 - Recommendation `as_of_date` equals `data_as_of_date`.
 - `target_weight` sums approximately to `1.0`.
 - `estimated_commission_weight` equals `0.02 * trade_abs_weight` for planned BUY/SELL rows.
+- `commission_amount` equals `0.02 * abs(trade_notional)` for planned BUY/SELL rows.
 - `max weight` is at or below the configured max weight, allowing tiny solver tolerance.
 
 ## 9. Inspect Recommendations
@@ -250,7 +283,7 @@ Top recommendations:
 uv run python -c 'import os, pandas as pd
 run = os.environ["RUN_ID"]
 recs = pd.read_parquet(f"data/runs/{run}/gold/portfolio_recommendations.parquet")
-cols = ["ticker", "security", "gics_sector", "current_weight", "target_weight", "trade_weight", "estimated_commission_weight", "action", "reason_code"]
+cols = ["ticker", "security", "gics_sector", "current_weight", "target_weight", "trade_weight", "trade_notional", "commission_amount", "action", "reason_code"]
 print(recs[cols].head(25).to_string(index=False))
 '
 ```

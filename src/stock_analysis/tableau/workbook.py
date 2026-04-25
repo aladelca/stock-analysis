@@ -97,6 +97,43 @@ FIELDS: dict[str, TableauField] = {
     "cash_released_weight": TableauField(
         "cash_released_weight", "real", "measure", "quantitative", "Cash Released Weight"
     ),
+    "portfolio_value_after_contribution": TableauField(
+        "portfolio_value_after_contribution",
+        "real",
+        "measure",
+        "quantitative",
+        "Portfolio Value After Contribution",
+    ),
+    "contribution_amount": TableauField(
+        "contribution_amount", "real", "measure", "quantitative", "Contribution Amount"
+    ),
+    "current_market_value": TableauField(
+        "current_market_value", "real", "measure", "quantitative", "Current Market Value"
+    ),
+    "target_market_value": TableauField(
+        "target_market_value", "real", "measure", "quantitative", "Target Market Value"
+    ),
+    "trade_notional": TableauField(
+        "trade_notional", "real", "measure", "quantitative", "Trade Notional"
+    ),
+    "commission_amount": TableauField(
+        "commission_amount", "real", "measure", "quantitative", "Commission Amount"
+    ),
+    "deposit_used_amount": TableauField(
+        "deposit_used_amount", "real", "measure", "quantitative", "Deposit Used Amount"
+    ),
+    "cash_after_trade_amount": TableauField(
+        "cash_after_trade_amount", "real", "measure", "quantitative", "Cash After Trade Amount"
+    ),
+    "no_trade_band_applied": TableauField(
+        "no_trade_band_applied", "boolean", "dimension", "nominal", "No Trade Band Applied"
+    ),
+    "trade_notional_label": TableauField(
+        "trade_notional_label", "string", "dimension", "nominal", "Trade Notional Label"
+    ),
+    "commission_amount_label": TableauField(
+        "commission_amount_label", "string", "dimension", "nominal", "Commission Amount Label"
+    ),
     "current_weight_label": TableauField(
         "current_weight_label", "string", "dimension", "nominal", "Current Weight Label"
     ),

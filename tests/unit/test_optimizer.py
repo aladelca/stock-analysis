@@ -156,3 +156,57 @@ def test_sector_cap_limits_aggregate_sector_weight() -> None:
 
     assert tech_weight <= 0.500001
     assert weights.sum() == pytest.approx(1.0)
+
+
+def test_max_trade_abs_weight_limits_total_absolute_trade() -> None:
+    optimizer_input = pd.DataFrame(
+        {
+            "ticker": ["AAA", "BBB", "CCC", "DDD"],
+            "expected_return": [0.4, 0.3, 0.0, 0.0],
+            "eligible_for_optimization": [True, True, True, True],
+        }
+    )
+    covariance = pd.DataFrame(
+        0.0,
+        index=["AAA", "BBB", "CCC", "DDD"],
+        columns=["AAA", "BBB", "CCC", "DDD"],
+    )
+    for ticker in covariance.index:
+        covariance.loc[ticker, ticker] = 0.2
+    previous = pd.Series({"AAA": 0.25, "BBB": 0.25, "CCC": 0.25, "DDD": 0.25})
+
+    weights = optimize_long_only(
+        optimizer_input,
+        covariance,
+        OptimizerConfig(
+            max_weight=0.8,
+            risk_aversion=0.1,
+            commission_rate=0,
+            lambda_turnover=0,
+            max_trade_abs_weight=0.1,
+        ),
+        w_prev=previous,
+    )
+
+    assert (weights - previous.reindex(weights.index)).abs().sum() <= 0.100001
+    assert weights.sum() == pytest.approx(1.0)
+
+
+def test_max_trade_abs_weight_can_make_problem_infeasible() -> None:
+    optimizer_input = pd.DataFrame(
+        {
+            "ticker": ["AAA", "BBB", "CCC"],
+            "expected_return": [0.4, 0.3, 0.0],
+            "eligible_for_optimization": [True, True, True],
+        }
+    )
+    covariance = pd.DataFrame(0.2, index=["AAA", "BBB", "CCC"], columns=["AAA", "BBB", "CCC"])
+    previous = pd.Series({"AAA": 1.0, "BBB": 0.0, "CCC": 0.0})
+
+    with pytest.raises(OptimizationError):
+        optimize_long_only(
+            optimizer_input,
+            covariance,
+            OptimizerConfig(max_weight=0.5, max_trade_abs_weight=0.0),
+            w_prev=previous,
+        )

@@ -49,6 +49,8 @@ def optimize_long_only(
         weights >= 0,
         weights <= config.max_weight,
     ]
+    if config.max_trade_abs_weight is not None:
+        constraints.append(cp.norm1(weights - previous_weights) <= config.max_trade_abs_weight)
     constraints.extend(_sector_constraints(eligible, weights, config))
     problem = cp.Problem(objective, constraints)
 

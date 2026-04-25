@@ -292,8 +292,14 @@ The trade-aware layer also uses the current portfolio weights:
 w_prev_i = current portfolio weight for asset i before rebalance
 ```
 
-Current weights come from `portfolio_state.current_holdings_path`. If no holdings file is
-configured, the run is treated as a first allocation:
+Current weights come from `portfolio_state.current_holdings_path`. If a contribution is configured,
+the optimizer uses post-contribution current weights:
+
+```text
+w_prev_post_i = current_market_value_i / (portfolio_value_before_contribution + contribution)
+```
+
+If no holdings file is configured, the run is treated as a first allocation from cash:
 
 ```text
 w_prev_i = 0 for all optimizer assets
@@ -382,6 +388,17 @@ sector_max_weight = 0.35
 ```
 
 This prevents the optimizer from allocating too much of the portfolio to one GICS sector.
+
+#### Optional Trade Budget
+
+If `optimizer.max_trade_abs_weight` is configured, the optimizer limits total absolute trade size:
+
+```text
+||w - w_prev||_1 <= max_trade_abs_weight
+```
+
+This is a convex turnover budget. It is separate from `lambda_turnover`, which is a penalty in the
+objective rather than a hard limit.
 
 #### Eligibility Constraint
 
@@ -480,6 +497,82 @@ cash_required_weight_i = trade_weight_i + estimated_commission_weight_i for BUY 
 cash_released_weight_i = trade_abs_weight_i - estimated_commission_weight_i for SELL rows
 ```
 
+When a portfolio value or market-value holdings are available, recommendations also include dollar
+fields:
+
+```text
+portfolio_value_before_contribution
+contribution_amount
+portfolio_value_after_contribution
+current_market_value
+target_market_value
+trade_notional
+commission_amount
+deposit_used_amount
+cash_after_trade_amount
+no_trade_band_applied
+```
+
+Commission dollars are computed from traded notional:
+
+```text
+commission_amount_i = abs(trade_notional_i) * commission_rate
+```
+
+Example with a deposit:
+
+```text
+portfolio value before contribution = 1000
+contribution = 100
+portfolio value after contribution = 1100
+BUY trade = 50% of post-contribution value = 550
+commission = 550 * 0.02 = 11
+```
+
+The no-trade band is an execution rule, not a mixed-integer optimizer constraint:
+
+```text
+if abs(trade_weight_i) < execution.no_trade_band:
+    action_i = HOLD
+```
+
+This keeps the optimization problem convex while suppressing small trades in the recommendation
+layer.
+
+## Contribution-Aware Backtesting
+
+The walk-forward backtest can model fixed external contributions every configured number of calendar
+days. Calendar deposit dates are mapped to the next available rebalance date.
+
+At each rebalance date `t`, the sequence is:
+
+1. Train on point-in-time rows before `t - embargo_days`.
+2. Predict scores at `t`.
+3. Add the scheduled external contribution.
+4. Dilute existing weights onto the post-contribution portfolio base.
+5. Optimize target weights using post-contribution `w_prev`.
+6. Charge commission on absolute executed trade notional.
+7. Hold the portfolio for the forecast horizon.
+
+The backtest reports two different performance concepts:
+
+```text
+TWR = time-weighted return
+```
+
+TWR measures strategy skill independent of deposit timing. It is the primary metric for model and
+SPY-relative validation.
+
+```text
+MWR / XIRR = money-weighted return
+```
+
+MWR measures the investor-specific result after external deposits. It depends on when cash was added
+and is reported as an outcome metric, not as the primary model-skill gate.
+
+Same-deposit SPY comparison uses the same initial value, same deposit dates, same deposit amounts,
+and the same commission assumption.
+
 ### `portfolio_risk_metrics`
 
 The pipeline reports:
@@ -536,6 +629,10 @@ The current implementation assumes:
 - Missing returns are filled with zero in the covariance matrix, which can understate risk for sparse assets.
 - Transaction costs are modeled as a flat percentage commission, not market impact or spread cost.
 - Current portfolio input is weight-based; share-count order generation is not implemented.
+- Fixed-dollar one-shot contributions require either market-value holdings or an explicit portfolio
+  value so dollars can be converted into post-contribution weights.
+- No-trade bands are applied after optimization, so residual cash can remain when small trades are
+  suppressed.
 - There are no industry, beta, or liquidity constraints yet.
 - The covariance matrix uses a simple empirical estimator rather than shrinkage or factor risk modeling.
 - The optimizer can produce tiny numerical weights due to solver tolerance.
@@ -552,3 +649,5 @@ The current implementation assumes:
 8. Add robust forecast scaling, winsorization, and feature standardization.
 9. Add confidence intervals or forecast uncertainty bands.
 10. Add model versioning to every forecast and optimization output.
+11. Add share-count order generation and tax-lot-aware execution after broker/account integration is
+    in scope.

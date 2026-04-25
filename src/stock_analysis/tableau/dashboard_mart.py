@@ -21,6 +21,8 @@ def build_dashboard_mart(
     mart["estimated_commission_weight_label"] = mart["estimated_commission_weight"].map(
         lambda value: f"{float(value):.2%}"
     )
+    mart["trade_notional_label"] = mart["trade_notional"].map(_currency_label)
+    mart["commission_amount_label"] = mart["commission_amount"].map(_currency_label)
     mart["scatter_size"] = mart["target_weight"].where(mart["selected"], 0.001)
 
     for column, metric_value in risk_wide.items():
@@ -68,6 +70,18 @@ def build_dashboard_mart(
         "net_trade_weight_after_commission",
         "cash_required_weight",
         "cash_released_weight",
+        "portfolio_value_before_contribution",
+        "contribution_amount",
+        "portfolio_value_after_contribution",
+        "current_market_value",
+        "target_market_value",
+        "trade_notional",
+        "trade_notional_label",
+        "commission_amount",
+        "commission_amount_label",
+        "deposit_used_amount",
+        "cash_after_trade_amount",
+        "no_trade_band_applied",
         "selected",
         "scatter_size",
         "action",
@@ -131,3 +145,10 @@ def _coerce_date_columns(frame: pd.DataFrame, columns: list[str]) -> pd.DataFram
         if column in result.columns:
             result[column] = pd.to_datetime(result[column], errors="coerce").dt.date
     return result
+
+
+def _currency_label(value: object) -> str:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric):
+        return ""
+    return f"${float(numeric):,.2f}"

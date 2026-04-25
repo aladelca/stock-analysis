@@ -86,6 +86,64 @@ uv run stock-analysis tune-turnover \
 | E8, 2% commission, `lambda_turnover=0.001` | -43.39% | -46.12% | 36.51% | -1.263 | -44.44% | -51.00% | -71.73% | -2.539 |
 | E8, 2% commission, selected `lambda_turnover=5.0` | 8.80% | 9.60% | 34.66% | 0.277 | -18.86% | -5.85% | -1.85% | -0.067 |
 
+## Contribution-Aware Run
+
+After adding contribution-aware backtesting, I reran E8 with the same selected turnover penalty,
+2% commission, and a realistic deposit schedule:
+
+```text
+initial_portfolio_value = 1000
+monthly_deposit_amount = 100
+deposit_frequency_days = 30
+no_trade_band = 0.02
+lambda_turnover = 5.0
+```
+
+Artifact:
+
+```text
+docs/experiments/e8-contribution-aware-20260424.json
+```
+
+MLflow:
+
+```text
+experiment = stock-analysis-autoresearch
+run_id = 9389faa1ef314962ba3df487b0900d09
+tracking_uri = sqlite:///data/mlflow/mlflow.db
+```
+
+Same-deposit outcome:
+
+| Metric | E8 Contribution-Aware | SPY Same Deposits |
+| --- | ---: | ---: |
+| Ending value | $6,671.40 | $6,151.76 |
+| Active ending value | $519.64 | n/a |
+| Total deposits | $4,700.00 | $4,700.00 |
+| Total commissions | $316.18 | $114.00 |
+| Commission / deposits | 6.73% | 2.43% |
+| Time-weighted return | 25.29% | 15.55% |
+| Money-weighted return | 7.11% | 3.43% |
+| Return on invested capital | 17.04% | 7.93% |
+
+Risk/skill metrics on the same rebalance dates:
+
+| Strategy | Annualized Return | Annualized Volatility | Sharpe | Max Drawdown | Annualized Active Return vs SPY | Information Ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SPY same dates | 17.01% | 15.04% | 1.131 | -11.94% | n/a | n/a |
+| E8 contribution-aware | 27.77% | 35.79% | 0.776 | -17.45% | 13.86% | 0.521 |
+
+Interpretation:
+
+```text
+The same-deposit investor outcome beat SPY in ending dollars.
+The strategy still failed the existing promotion gate because candidate Sharpe did not beat SPY Sharpe.
+```
+
+This is the correct distinction. Deposits improve investor wealth and reduce forced selling, but the
+model gate should still use time-weighted, benchmark-relative metrics because deposits are external
+cash flows.
+
 ## Turnover Penalty Sweep
 
 | Lambda Turnover | Cumulative Return | Annualized Return | Sharpe | Information Ratio | Mean Turnover | Commission Drag / Rebalance | Max Drawdown |

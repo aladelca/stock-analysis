@@ -2,11 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 
 import numpy as np
 import pandas as pd
 
+from stock_analysis.backtest.cashflows import (
+    ContributionSchedule,
+    contributions_for_rebalance_dates,
+    cumulative_time_weighted_return,
+    money_weighted_return,
+)
 from stock_analysis.config import OptimizerConfig
 from stock_analysis.optimization.engine import optimize_long_only
 
@@ -27,6 +34,11 @@ class BacktestConfig:
     covariance_lookback_days: int = 252
     feature_columns: tuple[str, ...] = ()
     max_rebalances: int | None = None
+    initial_portfolio_value: float = 1000.0
+    monthly_deposit_amount: float = 0.0
+    deposit_frequency_days: int = 30
+    deposit_start_date: date | None = None
+    no_trade_band: float = 0.0
 
 
 def run_walk_forward_backtest(
@@ -77,6 +89,21 @@ def run_walk_forward_backtest(
             np.unique(sample_positions.astype(int))
         ]
 
+    contribution_by_date = contributions_for_rebalance_dates(
+        candidate_rebalance_dates,
+        ContributionSchedule(
+            amount=cfg.monthly_deposit_amount,
+            frequency_days=cfg.deposit_frequency_days,
+            start_date=cfg.deposit_start_date,
+        ),
+    )
+    portfolio_value = float(cfg.initial_portfolio_value)
+    cashflows: list[tuple[date, float]] = []
+    twr_returns: list[float] = []
+    total_deposits = 0.0
+    total_commissions = 0.0
+    first_rebalance_date: date | None = None
+
     for rebalance_date in candidate_rebalance_dates:
         if cfg.max_rebalances is not None and completed_rebalances >= cfg.max_rebalances:
             break
@@ -106,18 +133,33 @@ def run_walk_forward_backtest(
             rebalance_date,
             cfg.covariance_lookback_days,
         )
+        contribution = float(contribution_by_date.get(pd.Timestamp(rebalance_date), 0.0))
+        value_before_contribution = portfolio_value
+        value_after_contribution = value_before_contribution + contribution
+        if value_after_contribution <= 0:
+            msg = "Portfolio value after contribution must be positive"
+            raise ValueError(msg)
+        optimizer_previous_weights = _post_deposit_previous_weights(
+            previous_weights,
+            optimizer_input["ticker"].tolist(),
+            value_before_contribution=value_before_contribution,
+            value_after_contribution=value_after_contribution,
+        )
         weights = optimize_long_only(
             optimizer_input,
             covariance,
             optimizer_config,
-            w_prev=previous_weights,
+            w_prev=optimizer_previous_weights,
         )
-        aligned_previous = (
-            pd.Series(0.0, index=weights.index)
-            if previous_weights is None
-            else previous_weights.reindex(weights.index).fillna(0)
+        aligned_previous = optimizer_previous_weights.reindex(weights.index).fillna(0.0)
+        trade_delta = weights - aligned_previous
+        executed_trade_delta = _trade_delta_after_no_trade_band(
+            trade_delta,
+            cfg.no_trade_band,
         )
-        trade_abs_weight = float(np.abs(weights - aligned_previous).sum())
+        executed_weights = (aligned_previous + executed_trade_delta).clip(lower=0.0)
+        trade_abs_weight = float(np.abs(executed_trade_delta).sum())
+        raw_trade_abs_weight = float(np.abs(trade_delta).sum())
         turnover = 0.5 * trade_abs_weight
         commission_rate = (
             optimizer_config.commission_rate if cfg.commission_rate is None else cfg.commission_rate
@@ -127,10 +169,33 @@ def run_walk_forward_backtest(
             if commission_rate > 0
             else cfg.cost_bps / 10_000 * turnover
         )
+        commission_paid = period_cost * value_after_contribution
 
         realized = features_at_rebalance.set_index("ticker")[realized_target_col].astype(float)
-        gross_return = float((weights * realized.reindex(weights.index).fillna(0)).sum())
+        gross_return = float((executed_weights * realized.reindex(weights.index).fillna(0)).sum())
         net_return = gross_return - period_cost
+        portfolio_value_end = value_after_contribution * (1 + net_return)
+        buy_notional = float(executed_trade_delta.clip(lower=0).sum() * value_after_contribution)
+        sell_notional = float(
+            executed_trade_delta.clip(upper=0).abs().sum() * value_after_contribution
+        )
+        cash_before_rebalance = max(
+            value_after_contribution - float(aligned_previous.sum() * value_after_contribution),
+            0.0,
+        )
+        cash_after_rebalance = (
+            cash_before_rebalance + sell_notional - buy_notional - commission_paid
+        )
+
+        if first_rebalance_date is None:
+            first_rebalance_date = rebalance_date.date()
+            cashflows.append((first_rebalance_date, -float(cfg.initial_portfolio_value)))
+        if contribution > 0:
+            cashflows.append((rebalance_date.date(), -contribution))
+            total_deposits += contribution
+        total_commissions += commission_paid
+        twr_returns.append(net_return)
+        cumulative_twr = cumulative_time_weighted_return(twr_returns)
 
         predictions = features_at_rebalance.set_index("ticker")["forecast_score"]
         for ticker, weight in weights.items():
@@ -139,6 +204,7 @@ def run_walk_forward_backtest(
                     "rebalance_date": rebalance_date.date().isoformat(),
                     "ticker": ticker,
                     "target_weight": float(weight),
+                    "executed_weight": float(executed_weights.get(ticker, 0.0)),
                     "previous_weight": float(aligned_previous.get(ticker, 0.0)),
                     "forecast_score": float(predictions.get(ticker, np.nan)),
                     "realized_return": float(realized.get(ticker, np.nan)),
@@ -147,13 +213,38 @@ def run_walk_forward_backtest(
                     "portfolio_net_return": net_return,
                     "turnover": turnover,
                     "trade_abs_weight": trade_abs_weight,
+                    "raw_trade_abs_weight": raw_trade_abs_weight,
                     "commission_rate": commission_rate,
+                    "portfolio_value_start": value_before_contribution,
+                    "external_contribution": contribution,
+                    "portfolio_value_after_contribution": value_after_contribution,
+                    "cash_before_rebalance": cash_before_rebalance,
+                    "buy_notional": buy_notional,
+                    "sell_notional": sell_notional,
+                    "commission_paid": commission_paid,
+                    "cash_after_rebalance": cash_after_rebalance,
+                    "portfolio_value_end": portfolio_value_end,
+                    "period_twr_return": net_return,
+                    "cumulative_twr_return": cumulative_twr,
                 }
             )
-        previous_weights = weights
+        previous_weights = executed_weights
+        portfolio_value = portfolio_value_end
         completed_rebalances += 1
 
-    return pd.DataFrame.from_records(records)
+    result = pd.DataFrame.from_records(records)
+    if result.empty or first_rebalance_date is None:
+        return result
+    final_date = pd.to_datetime(result["rebalance_date"]).max().date()
+    cashflows.append((final_date, portfolio_value))
+    return _attach_cashflow_summary(
+        result,
+        initial_portfolio_value=float(cfg.initial_portfolio_value),
+        ending_value=portfolio_value,
+        total_deposits=total_deposits,
+        total_commissions=total_commissions,
+        money_weighted=money_weighted_return(cashflows),
+    )
 
 
 def _prepare_dates(frame: pd.DataFrame) -> pd.DataFrame:
@@ -230,3 +321,52 @@ def _first_matching_column(frame: pd.DataFrame, prefix: str) -> str | None:
         if column.startswith(prefix):
             return column
     return None
+
+
+def _post_deposit_previous_weights(
+    previous_weights: pd.Series | None,
+    tickers: list[str],
+    *,
+    value_before_contribution: float,
+    value_after_contribution: float,
+) -> pd.Series:
+    if previous_weights is None:
+        return pd.Series(0.0, index=pd.Index(tickers, name="ticker"), name="previous_weight")
+    dilution = value_before_contribution / value_after_contribution
+    return (
+        previous_weights.reindex(tickers)
+        .fillna(0.0)
+        .astype(float)
+        .mul(dilution)
+        .rename("previous_weight")
+    )
+
+
+def _trade_delta_after_no_trade_band(trade_delta: pd.Series, no_trade_band: float) -> pd.Series:
+    if no_trade_band <= 0:
+        return trade_delta
+    return trade_delta.where(trade_delta.abs().ge(no_trade_band), 0.0)
+
+
+def _attach_cashflow_summary(
+    result: pd.DataFrame,
+    *,
+    initial_portfolio_value: float,
+    ending_value: float,
+    total_deposits: float,
+    total_commissions: float,
+    money_weighted: float | None,
+) -> pd.DataFrame:
+    enriched = result.copy()
+    invested_capital = initial_portfolio_value + total_deposits
+    enriched["strategy_ending_value"] = ending_value
+    enriched["total_deposits"] = total_deposits
+    enriched["total_commissions"] = total_commissions
+    enriched["commission_to_deposit_ratio"] = (
+        total_commissions / total_deposits if total_deposits > 0 else np.nan
+    )
+    enriched["total_return_on_invested_capital"] = (
+        ending_value / invested_capital - 1 if invested_capital > 0 else np.nan
+    )
+    enriched["money_weighted_return"] = np.nan if money_weighted is None else money_weighted
+    return enriched
