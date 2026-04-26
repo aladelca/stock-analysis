@@ -123,10 +123,11 @@ def test_recommendations_include_contribution_dollar_fields() -> None:
 
     by_ticker = recommendations.set_index("ticker")
     assert by_ticker.loc["BBB", "action"] == "BUY"
-    assert by_ticker.loc["BBB", "trade_notional"] == pytest.approx(250.0)
-    assert by_ticker.loc["BBB", "commission_amount"] == pytest.approx(5.0)
+    assert by_ticker.loc["BBB", "trade_notional"] == pytest.approx(245.0980392157)
+    assert by_ticker.loc["BBB", "commission_amount"] == pytest.approx(4.9019607843)
     assert by_ticker.loc["BBB", "portfolio_value_after_contribution"] == pytest.approx(1100)
     assert by_ticker.loc["BBB", "deposit_used_amount"] > 0
+    assert by_ticker["cash_after_trade_amount"].iloc[0] >= -1e-9
 
 
 def test_no_trade_band_converts_small_trades_to_hold() -> None:

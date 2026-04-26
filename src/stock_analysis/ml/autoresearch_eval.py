@@ -5,7 +5,7 @@ import json
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -98,6 +98,8 @@ class AutoresearchEvalConfig:
     initial_portfolio_value: float = 1000.0
     monthly_deposit_amount: float = 0.0
     deposit_frequency_days: int = 30
+    deposit_start_date: date | None = None
+    rebalance_on_deposit_day: bool = True
     no_trade_band: float = 0.0
 
 
@@ -141,6 +143,8 @@ def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
             initial_portfolio_value=config.initial_portfolio_value,
             monthly_deposit_amount=config.monthly_deposit_amount,
             deposit_frequency_days=config.deposit_frequency_days,
+            deposit_start_date=config.deposit_start_date,
+            rebalance_on_deposit_day=config.rebalance_on_deposit_day,
             no_trade_band=config.no_trade_band,
         ),
     )
@@ -227,6 +231,12 @@ def evaluate_turnover_sweep(config: TurnoverSweepConfig) -> dict[str, Any]:
             "initial_portfolio_value": config.base.initial_portfolio_value,
             "monthly_deposit_amount": config.base.monthly_deposit_amount,
             "deposit_frequency_days": config.base.deposit_frequency_days,
+            "deposit_start_date": (
+                config.base.deposit_start_date.isoformat()
+                if config.base.deposit_start_date is not None
+                else None
+            ),
+            "rebalance_on_deposit_day": config.base.rebalance_on_deposit_day,
             "no_trade_band": config.base.no_trade_band,
             "penalties": list(config.penalties),
         },
@@ -317,6 +327,8 @@ def decide_candidate(metrics: dict[str, float | None]) -> dict[str, Any]:
 
 def append_result_tsv(path: Path, result: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.stat().st_size > 0:
+        _migrate_result_tsv_schema(path)
     write_header = not path.exists() or path.stat().st_size == 0
     with path.open("a", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
@@ -328,6 +340,26 @@ def append_result_tsv(path: Path, result: dict[str, Any]) -> None:
         if write_header:
             writer.writeheader()
         writer.writerow(result_to_tsv_row(result))
+
+
+def _migrate_result_tsv_schema(path: Path) -> None:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if tuple(reader.fieldnames or ()) == RESULT_COLUMNS:
+            return
+        rows = [{column: row.get(column, "") for column in RESULT_COLUMNS} for row in reader]
+
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    with tmp_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=RESULT_COLUMNS,
+            delimiter="\t",
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    tmp_path.replace(path)
 
 
 def result_to_tsv_row(result: dict[str, Any]) -> dict[str, object]:
@@ -607,6 +639,10 @@ def _config_payload(config: AutoresearchEvalConfig, horizon_days: int) -> dict[s
         "initial_portfolio_value": config.initial_portfolio_value,
         "monthly_deposit_amount": config.monthly_deposit_amount,
         "deposit_frequency_days": config.deposit_frequency_days,
+        "deposit_start_date": (
+            config.deposit_start_date.isoformat() if config.deposit_start_date is not None else None
+        ),
+        "rebalance_on_deposit_day": config.rebalance_on_deposit_day,
         "no_trade_band": config.no_trade_band,
     }
 

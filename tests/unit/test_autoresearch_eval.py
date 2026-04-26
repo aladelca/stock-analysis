@@ -162,3 +162,67 @@ def test_append_result_tsv_writes_header_and_row(tmp_path) -> None:
     assert len(rows) == 1
     assert rows[0]["candidate_id"] == "candidate"
     assert float(rows[0]["candidate_sharpe"]) == pytest.approx(2.0)
+
+
+def test_append_result_tsv_migrates_older_header(tmp_path) -> None:
+    path = tmp_path / "results.tsv"
+    old_columns = [
+        "timestamp_utc",
+        "iteration_id",
+        "git_commit",
+        "candidate_id",
+        "candidate_description",
+        "input_run_root",
+        "max_assets",
+        "max_rebalances",
+        "optimizer_max_weight",
+        "cost_bps",
+        "candidate_sharpe",
+        "spy_sharpe",
+        "sharpe_diff",
+        "sharpe_diff_ci_low",
+        "sharpe_diff_ci_high",
+        "annualized_return",
+        "active_return",
+        "tracking_error",
+        "information_ratio",
+        "max_drawdown",
+        "mean_turnover",
+        "ir_observations",
+        "status",
+        "notes",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=old_columns, delimiter="\t")
+        writer.writeheader()
+        writer.writerow(
+            {
+                "timestamp_utc": "2026-04-24T00:00:00+00:00",
+                "candidate_id": "old-candidate",
+                "candidate_sharpe": 1.5,
+                "status": "provisional",
+            }
+        )
+
+    append_result_tsv(
+        path,
+        {
+            "timestamp_utc": "2026-04-25T00:00:00+00:00",
+            "candidate": {"candidate_id": "new-candidate", "description": "Candidate"},
+            "config": {"commission_rate": 0.02},
+            "metrics": {
+                "comparison": {"candidate_sharpe": 2.0},
+                "cashflow": {"strategy_ending_value": 1200.0},
+            },
+            "decision": {"status": "provisional"},
+        },
+    )
+
+    with path.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        rows = list(reader)
+    assert tuple(reader.fieldnames or ()) == RESULT_COLUMNS
+    assert [row["candidate_id"] for row in rows] == ["old-candidate", "new-candidate"]
+    assert rows[0]["commission_rate"] == ""
+    assert rows[1]["commission_rate"] == "0.02"
+    assert rows[1]["strategy_ending_value"] == "1200.0"

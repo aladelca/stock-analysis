@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
 from pathlib import Path
 
 from stock_analysis.ml.autoresearch_eval import (
@@ -43,6 +44,12 @@ def main() -> int:
     parser.add_argument("--initial-portfolio-value", type=float, default=1000.0)
     parser.add_argument("--monthly-deposit-amount", type=float, default=0.0)
     parser.add_argument("--deposit-frequency-days", type=int, default=30)
+    parser.add_argument("--deposit-start-date", type=date.fromisoformat, default=None)
+    parser.add_argument(
+        "--no-rebalance-on-deposit-day",
+        action="store_true",
+        help="Do not add deposit-mapped dates to the rebalance calendar.",
+    )
     parser.add_argument("--no-trade-band", type=float, default=0.0)
     parser.add_argument("--horizon-days", type=int, default=None)
     parser.add_argument("--rebalance-step-days", type=int, default=5)
@@ -95,6 +102,8 @@ def main() -> int:
             initial_portfolio_value=args.initial_portfolio_value,
             monthly_deposit_amount=args.monthly_deposit_amount,
             deposit_frequency_days=args.deposit_frequency_days,
+            deposit_start_date=args.deposit_start_date,
+            rebalance_on_deposit_day=not args.no_rebalance_on_deposit_day,
             no_trade_band=args.no_trade_band,
             horizon_days=args.horizon_days,
             rebalance_step_days=args.rebalance_step_days,

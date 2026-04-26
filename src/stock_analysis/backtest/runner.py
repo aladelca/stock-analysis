@@ -38,6 +38,7 @@ class BacktestConfig:
     monthly_deposit_amount: float = 0.0
     deposit_frequency_days: int = 30
     deposit_start_date: date | None = None
+    rebalance_on_deposit_day: bool = True
     no_trade_band: float = 0.0
 
 
@@ -78,7 +79,26 @@ def run_walk_forward_backtest(
     completed_rebalances = 0
 
     rebalance_step = max(cfg.rebalance_step_days, 1)
+    contribution_schedule = ContributionSchedule(
+        amount=cfg.monthly_deposit_amount,
+        frequency_days=cfg.deposit_frequency_days,
+        start_date=cfg.deposit_start_date,
+    )
     candidate_rebalance_dates = rebalance_dates[::rebalance_step]
+    if cfg.rebalance_on_deposit_day:
+        deposit_rebalance_dates = _deposit_rebalance_dates(
+            rebalance_dates,
+            contribution_schedule,
+        )
+        if len(deposit_rebalance_dates) > 0:
+            candidate_rebalance_dates = pd.DatetimeIndex(
+                sorted(
+                    {
+                        *[pd.Timestamp(value) for value in candidate_rebalance_dates],
+                        *[pd.Timestamp(value) for value in deposit_rebalance_dates],
+                    }
+                )
+            )
     if cfg.max_rebalances is not None and len(candidate_rebalance_dates) > cfg.max_rebalances:
         sample_positions = np.linspace(
             0,
@@ -91,11 +111,7 @@ def run_walk_forward_backtest(
 
     contribution_by_date = contributions_for_rebalance_dates(
         candidate_rebalance_dates,
-        ContributionSchedule(
-            amount=cfg.monthly_deposit_amount,
-            frequency_days=cfg.deposit_frequency_days,
-            start_date=cfg.deposit_start_date,
-        ),
+        contribution_schedule,
     )
     portfolio_value = float(cfg.initial_portfolio_value)
     cashflows: list[tuple[date, float]] = []
@@ -321,6 +337,16 @@ def _first_matching_column(frame: pd.DataFrame, prefix: str) -> str | None:
         if column.startswith(prefix):
             return column
     return None
+
+
+def _deposit_rebalance_dates(
+    rebalance_dates: pd.DatetimeIndex,
+    schedule: ContributionSchedule,
+) -> pd.DatetimeIndex:
+    mapped = contributions_for_rebalance_dates(rebalance_dates, schedule)
+    return pd.DatetimeIndex(
+        [rebalance_date for rebalance_date, amount in mapped.items() if amount > 0]
+    )
 
 
 def _post_deposit_previous_weights(

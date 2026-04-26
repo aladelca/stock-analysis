@@ -144,6 +144,38 @@ This is the correct distinction. Deposits improve investor wealth and reduce for
 model gate should still use time-weighted, benchmark-relative metrics because deposits are external
 cash flows.
 
+## Corrected Contribution-Aware Check
+
+After tightening contribution semantics, the benchmark time-weighted return is now net of benchmark
+entry/contribution commissions, and `rebalance_on_deposit_day=true` adds deposit-mapped trading days
+to the rebalance calendar before the sample cap is applied. The strongest sampled model under these
+corrected settings is no longer the raw E8 baseline:
+
+```text
+artifact = docs/experiments/e8-scale-0p5-contribution-corrected-20260426.json
+initial_portfolio_value = 1000
+monthly_deposit_amount = 100
+deposit_frequency_days = 30
+rebalance_on_deposit_day = true
+no_trade_band = 0.02
+lambda_turnover = 5.0
+commission_rate = 0.02
+```
+
+| Strategy | Decision | Ending Value | Active Ending Value vs SPY | TWR | MWR | Sharpe | SPY Sharpe | Information Ratio | Mean Turnover |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `e8_scale_0p5` | go | $8,610.66 | $2,495.55 | 91.13% | 18.92% | 4.002 | 1.320 | 3.134 | 2.69% |
+| `e8_baseline` | provisional | $8,549.02 | $2,433.91 | 97.09% | 18.58% | 3.442 | 1.320 | 2.541 | 4.64% |
+| `e8_weight_ridge_1p2_lgbm_0p8_scale_0p85` | provisional | $8,546.90 | $2,431.79 | 94.73% | 18.57% | 3.786 | 1.320 | 2.731 | 3.62% |
+| `e8_weight_ridge_1p2_lgbm_0p8_scale_1p10` | provisional | $8,091.81 | $1,976.70 | 76.17% | 15.99% | 2.568 | 1.320 | 1.932 | 6.44% |
+| `e8_weight_ridge_1p2_lgbm_0p8_scale_1p20` | provisional | $7,708.17 | $1,593.06 | 65.95% | 13.72% | 2.045 | 1.320 | 1.553 | 8.43% |
+
+The same-deposit SPY path for this corrected check ended at `$6,115.11`, with `10.78%`
+time-weighted return and `3.14%` money-weighted return. On this 46-observation sample,
+`e8_scale_0p5` clears the existing promotion gate because its Sharpe-difference bootstrap lower
+bound is positive (`0.1708`). It still needs broader coverage before a production switch because
+current-constituent survivorship and latest-liquidity look-ahead are still known limitations.
+
 ## Turnover Penalty Sweep
 
 | Lambda Turnover | Cumulative Return | Annualized Return | Sharpe | Information Ratio | Mean Turnover | Commission Drag / Rebalance | Max Drawdown |

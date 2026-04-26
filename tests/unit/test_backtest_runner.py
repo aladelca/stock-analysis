@@ -165,6 +165,64 @@ def test_contributions_map_to_next_rebalance_date() -> None:
     assert mapped[pd.Timestamp("2025-02-03")] == 100
 
 
+def test_rebalance_on_deposit_day_adds_deposit_mapped_rebalance() -> None:
+    dates = pd.bdate_range("2025-01-01", periods=80)
+    tickers = ["AAA", "BBB", "CCC"]
+    panel_rows: list[dict[str, object]] = []
+    return_rows: list[dict[str, object]] = []
+    label_rows: list[dict[str, object]] = []
+    for ticker_idx, ticker in enumerate(tickers):
+        for current_date in dates:
+            panel_rows.append(
+                {
+                    "ticker": ticker,
+                    "date": current_date.date().isoformat(),
+                    "momentum_5d": 0.2 - ticker_idx * 0.05,
+                    "volatility_21d": 0.2,
+                    "security": ticker,
+                    "gics_sector": "Sector",
+                }
+            )
+            return_rows.append(
+                {
+                    "ticker": ticker,
+                    "date": current_date.date().isoformat(),
+                    "return_1d": 0.001,
+                }
+            )
+            label_rows.append(
+                {
+                    "ticker": ticker,
+                    "date": current_date.date().isoformat(),
+                    "fwd_return_5d": 0.01 + ticker_idx * 0.001,
+                }
+            )
+
+    deposit_date = dates[25].date()
+    result = run_walk_forward_backtest(
+        pd.DataFrame(panel_rows),
+        pd.DataFrame(label_rows),
+        pd.DataFrame(return_rows),
+        lambda train: MomentumModel(),
+        OptimizerConfig(max_weight=0.6, risk_aversion=0.1, commission_rate=0.02),
+        BacktestConfig(
+            horizon_days=5,
+            rebalance_step_days=10,
+            embargo_days=5,
+            covariance_lookback_days=20,
+            monthly_deposit_amount=100,
+            deposit_frequency_days=100,
+            deposit_start_date=deposit_date,
+            rebalance_on_deposit_day=True,
+        ),
+    )
+
+    periods = result.drop_duplicates("rebalance_date")
+    assert deposit_date.isoformat() in set(periods["rebalance_date"])
+    deposited = periods.set_index("rebalance_date").loc[deposit_date.isoformat()]
+    assert deposited["external_contribution"] == pytest.approx(100)
+
+
 def test_money_weighted_return_solves_simple_cashflows() -> None:
     value = money_weighted_return([(date(2025, 1, 1), -1000), (date(2026, 1, 1), 1100)])
 

@@ -109,24 +109,28 @@ def simulate_benchmark_value_path(
     total_deposits = 0.0
     total_commissions = 0.0
     twr_returns: list[float] = []
+    initial_commission_pending = True
 
     first_date = sorted_returns["date"].iloc[0].date()
     cashflows.append((first_date, -value))
-    total_commissions += value * commission_rate
-    value -= value * commission_rate
 
     for _, row in sorted_returns.iterrows():
         current_date = pd.Timestamp(row["date"])
         contribution = float(contribution_by_date.get(current_date, 0.0))
+        period_base = value + contribution
+        commission = 0.0
+        if initial_commission_pending:
+            commission += float(initial_value) * commission_rate
+            initial_commission_pending = False
         if contribution > 0:
             cashflows.append((current_date.date(), -contribution))
             total_deposits += contribution
-            commission = contribution * commission_rate
-            total_commissions += commission
-            value += contribution - commission
+            commission += contribution * commission_rate
+        total_commissions += commission
+        value = period_base - commission
         period_return = float(row[benchmark_col])
         value *= 1 + period_return
-        twr_returns.append(period_return)
+        twr_returns.append(value / period_base - 1 if period_base > 0 else period_return)
 
     final_date = sorted_returns["date"].iloc[-1].date()
     cashflows.append((final_date, value))

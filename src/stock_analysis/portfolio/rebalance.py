@@ -71,6 +71,11 @@ def plan_rebalance_trades(
         trade_weights.to_numpy(dtype=float) * context.portfolio_value_after_contribution,
         0.0,
     )
+    trade_notional = _cap_buys_to_available_cash(
+        trade_notional,
+        available_cash=context.cash_before_rebalance,
+        commission_rate=float(commission_rate),
+    )
     commission_amount = np.abs(trade_notional) * float(commission_rate)
     required = np.where(trade_notional > 0, trade_notional + commission_amount, 0.0)
     released = np.where(trade_notional < 0, np.abs(trade_notional) - commission_amount, 0.0)
@@ -99,6 +104,26 @@ def plan_rebalance_trades(
             "portfolio_value_after_contribution": context.portfolio_value_after_contribution,
         }
     )
+
+
+def _cap_buys_to_available_cash(
+    trade_notional: np.ndarray,
+    *,
+    available_cash: float,
+    commission_rate: float,
+) -> np.ndarray:
+    result = trade_notional.astype(float).copy()
+    buy_mask = result > 0
+    if not buy_mask.any():
+        return result
+    released = float(np.sum(np.maximum(-result, 0.0) * (1 - commission_rate)))
+    cash_available_for_buys = max(float(available_cash), 0.0) + released
+    required_for_buys = float(np.sum(result[buy_mask]) * (1 + commission_rate))
+    if required_for_buys <= cash_available_for_buys or required_for_buys <= 0:
+        return result
+    scale = cash_available_for_buys / required_for_buys
+    result[buy_mask] *= max(scale, 0.0)
+    return result
 
 
 def _resolve_before_value(state: PortfolioState, portfolio_value: float | None) -> float:

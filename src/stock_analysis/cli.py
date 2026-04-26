@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 from typing import Literal, cast
 
@@ -122,6 +123,11 @@ AUTORESEARCH_MLFLOW_EXPERIMENT_NAME_OPTION = typer.Option(
     "--mlflow-experiment-name",
     help="MLflow experiment name used when --mlflow is set.",
 )
+DEPOSIT_START_DATE_OPTION = typer.Option(
+    None,
+    "--deposit-start-date",
+    help="First contribution date in YYYY-MM-DD format.",
+)
 TURNOVER_PENALTIES_OPTION = typer.Option(
     "0.001,0.005,0.01,0.02,0.05,0.1,0.2,0.5,1,2,5",
     "--turnover-penalties",
@@ -216,6 +222,11 @@ def autoresearch_eval_command(
     initial_portfolio_value: float = typer.Option(1000.0, "--initial-portfolio-value"),
     monthly_deposit_amount: float = typer.Option(0.0, "--monthly-deposit-amount"),
     deposit_frequency_days: int = typer.Option(30, "--deposit-frequency-days"),
+    deposit_start_date: str | None = DEPOSIT_START_DATE_OPTION,
+    rebalance_on_deposit_day: bool = typer.Option(
+        True,
+        "--rebalance-on-deposit-day/--no-rebalance-on-deposit-day",
+    ),
     no_trade_band: float = typer.Option(0.0, "--no-trade-band"),
     horizon_days: int | None = typer.Option(None, "--horizon-days"),
     rebalance_step_days: int = typer.Option(5, "--rebalance-step-days"),
@@ -253,6 +264,8 @@ def autoresearch_eval_command(
             initial_portfolio_value=initial_portfolio_value,
             monthly_deposit_amount=monthly_deposit_amount,
             deposit_frequency_days=deposit_frequency_days,
+            deposit_start_date=_parse_date_option(deposit_start_date, "--deposit-start-date"),
+            rebalance_on_deposit_day=rebalance_on_deposit_day,
             no_trade_band=no_trade_band,
         )
     )
@@ -300,6 +313,11 @@ def tune_turnover_command(
     initial_portfolio_value: float = typer.Option(1000.0, "--initial-portfolio-value"),
     monthly_deposit_amount: float = typer.Option(0.0, "--monthly-deposit-amount"),
     deposit_frequency_days: int = typer.Option(30, "--deposit-frequency-days"),
+    deposit_start_date: str | None = DEPOSIT_START_DATE_OPTION,
+    rebalance_on_deposit_day: bool = typer.Option(
+        True,
+        "--rebalance-on-deposit-day/--no-rebalance-on-deposit-day",
+    ),
     no_trade_band: float = typer.Option(0.0, "--no-trade-band"),
     turnover_penalties: str = TURNOVER_PENALTIES_OPTION,
     objective_metric: str = TURNOVER_OBJECTIVE_OPTION,
@@ -336,6 +354,8 @@ def tune_turnover_command(
                 initial_portfolio_value=initial_portfolio_value,
                 monthly_deposit_amount=monthly_deposit_amount,
                 deposit_frequency_days=deposit_frequency_days,
+                deposit_start_date=_parse_date_option(deposit_start_date, "--deposit-start-date"),
+                rebalance_on_deposit_day=rebalance_on_deposit_day,
                 no_trade_band=no_trade_band,
             ),
             penalties=penalties,
@@ -436,3 +456,13 @@ def _parse_float_list(raw: str) -> tuple[float, ...]:
         print("[red]Provide at least one numeric value.[/red]")
         raise typer.Exit(2)
     return tuple(values)
+
+
+def _parse_date_option(raw: str | None, option_name: str) -> date | None:
+    if raw is None:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError as exc:
+        print(f"[red]Invalid date for {option_name}: {raw}. Use YYYY-MM-DD.[/red]")
+        raise typer.Exit(2) from exc

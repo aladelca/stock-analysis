@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from stock_analysis.backtest.cashflows import simulate_benchmark_value_path
 from stock_analysis.ml.evaluation import (
     EvaluationConfig,
     benchmark_relative_metrics,
@@ -71,3 +72,23 @@ def test_benchmark_relative_information_ratio_uses_aligned_active_returns() -> N
     assert metrics["information_ratio"] == pytest.approx(
         expected_active_return / expected_tracking_error
     )
+
+
+def test_benchmark_cashflow_twr_is_net_of_commissions() -> None:
+    benchmark = pd.DataFrame(
+        {
+            "date": ["2026-01-01", "2026-01-08"],
+            "benchmark_return": [0.0, 0.0],
+        }
+    )
+
+    metrics = simulate_benchmark_value_path(
+        benchmark,
+        initial_value=1000.0,
+        contribution_by_date={},
+        commission_rate=0.02,
+    )
+
+    assert metrics["benchmark_ending_value"] == pytest.approx(980.0)
+    assert metrics["benchmark_time_weighted_return"] == pytest.approx(-0.02)
+    assert metrics["benchmark_money_weighted_return"] < 0
