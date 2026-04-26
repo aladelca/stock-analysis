@@ -89,7 +89,7 @@ schedule against SPY:
 
 ```bash
 uv run --extra mlflow stock-analysis autoresearch-eval \
-  --candidate e8_baseline \
+  --candidate e8_scale_0p5 \
   --input-run-root data/runs/phase2-source-20260424 \
   --max-assets 100 \
   --max-rebalances 48 \
@@ -101,14 +101,15 @@ uv run --extra mlflow stock-analysis autoresearch-eval \
   --initial-portfolio-value 1000 \
   --monthly-deposit-amount 100 \
   --deposit-frequency-days 30 \
+  --rebalance-on-deposit-day \
   --no-trade-band 0.02 \
   --horizon-days 5 \
   --rebalance-step-days 5 \
   --embargo-days 15 \
   --covariance-lookback-days 252 \
-  --iteration-id e8-contribution-aware-20260424 \
+  --iteration-id e8-scale-0p5-contribution-corrected-20260426 \
   --mlflow \
-  --json-output docs/experiments/e8-contribution-aware-20260424.json
+  --json-output docs/experiments/e8-scale-0p5-contribution-corrected-20260426.json
 ```
 
 Interpret cash-flow fields separately:

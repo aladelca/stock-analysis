@@ -49,6 +49,19 @@ def test_build_ml_optimizer_inputs_uses_phase2_blend_and_liquidity_filter() -> N
                 }
             )
 
+    raw_optimizer_input, _ = build_ml_optimizer_inputs(
+        pd.DataFrame(panel_rows),
+        pd.DataFrame(label_rows),
+        pd.DataFrame(return_rows),
+        ForecastConfig(
+            engine="ml",
+            covariance_lookback_days=40,
+            ml_max_assets=4,
+            ml_feature_columns=["momentum_21d", "volatility_63d", "return_5d"],
+            ml_score_scale=1.0,
+            ml_lightgbm_nested_cv=False,
+        ),
+    )
     optimizer_input, covariance = build_ml_optimizer_inputs(
         pd.DataFrame(panel_rows),
         pd.DataFrame(label_rows),
@@ -58,15 +71,20 @@ def test_build_ml_optimizer_inputs_uses_phase2_blend_and_liquidity_filter() -> N
             covariance_lookback_days=40,
             ml_max_assets=4,
             ml_feature_columns=["momentum_21d", "volatility_63d", "return_5d"],
+            ml_score_scale=0.5,
             ml_lightgbm_nested_cv=False,
         ),
     )
 
     assert len(optimizer_input) == 4
     assert optimizer_input["forecast_engine"].eq("ml").all()
-    assert optimizer_input["forecast_model_version"].eq("phase2-e8-ridge-lightgbm-blend-v1").all()
+    assert optimizer_input["forecast_model_version"].eq("e8-scale-0p5-contribution-aware-v1").all()
     assert not optimizer_input["expected_return_is_calibrated"].any()
     assert optimizer_input["expected_return"].notna().all()
+    np.testing.assert_allclose(
+        raw_optimizer_input["forecast_score"].to_numpy() * 0.5,
+        optimizer_input["forecast_score"].to_numpy(),
+    )
     assert optimizer_input["eligible_for_optimization"].all()
     assert set(covariance.columns) == set(optimizer_input["ticker"])
     assert set(optimizer_input["ticker"]) == {"T2", "T3", "T4", "T5"}

@@ -36,9 +36,10 @@ forecast:
   volatility_penalty: 0.25
   covariance_lookback_days: 252
   label_horizons: [5, 21, 63]
-  ml_model_version: phase2-e8-ridge-lightgbm-blend-v1
+  ml_model_version: e8-scale-0p5-contribution-aware-v1
   ml_horizon_days: 5
   ml_max_assets: 100
+  ml_score_scale: 0.5
   ml_lightgbm_nested_cv: false
   ml_lightgbm_inner_folds: 2
   ml_random_seed: 42

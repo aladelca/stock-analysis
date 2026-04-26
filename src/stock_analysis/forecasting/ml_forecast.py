@@ -55,7 +55,9 @@ def build_ml_optimizer_inputs(
         nested_cv=config.ml_lightgbm_nested_cv,
         inner_folds=config.ml_lightgbm_inner_folds,
     )
-    forecast_score = np.asarray(model.predict(latest_features), dtype=float)
+    forecast_score = np.asarray(model.predict(latest_features), dtype=float) * float(
+        config.ml_score_scale
+    )
 
     optimizer_input = latest_features.copy()
     optimizer_input["forecast_score"] = forecast_score

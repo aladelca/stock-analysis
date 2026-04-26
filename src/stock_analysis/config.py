@@ -73,10 +73,11 @@ class ForecastConfig(BaseModel):
     volatility_penalty: float = Field(default=0.25, ge=0)
     covariance_lookback_days: int = Field(default=252, ge=2)
     label_horizons: list[int] = Field(default_factory=lambda: [5, 21, 63])
-    ml_model_version: str = "phase2-e8-ridge-lightgbm-blend-v1"
+    ml_model_version: str = "e8-scale-0p5-contribution-aware-v1"
     ml_horizon_days: int = Field(default=5, ge=1)
     ml_max_assets: int | None = Field(default=100, ge=1)
     ml_feature_columns: list[str] = Field(default_factory=list)
+    ml_score_scale: float = Field(default=0.5, gt=0)
     ml_lightgbm_nested_cv: bool = False
     ml_lightgbm_inner_folds: int = Field(default=2, ge=1)
     ml_random_seed: int = 42

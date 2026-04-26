@@ -32,9 +32,10 @@ Enable publishing in `configs/portfolio.local.yaml`:
 ```yaml
 forecast:
   engine: ml
-  ml_model_version: phase2-e8-ridge-lightgbm-blend-v1
+  ml_model_version: e8-scale-0p5-contribution-aware-v1
   ml_horizon_days: 5
   ml_max_assets: 100
+  ml_score_scale: 0.5
 
 optimizer:
   max_weight: 0.30

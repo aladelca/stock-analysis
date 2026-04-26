@@ -103,13 +103,24 @@ SPY forward returns for the same horizon. The evaluator computes:
 
 The `ir_observations` ledger column records the aligned row count used for this calculation.
 
-## Current Outcome
+## Contribution-Aware Production Check
 
-The current champion is `e8_weight_ridge_1p2_lgbm_0p8_scale_1p20`. It beats SPY on point estimates
-and improves materially over the original E8 baseline, but it is still a provisional candidate
-because the Sharpe-difference confidence interval lower bound remains negative.
+The corrected contribution-aware production check uses 2% commissions, `lambda_turnover=5.0`,
+`monthly_deposit_amount=100`, `rebalance_on_deposit_day=true`, and the same-deposit SPY benchmark
+with benchmark TWR net of commissions. Under that contract, the strongest sampled candidate is
+`e8_scale_0p5`, not the earlier fast-loop champion.
+
+| Candidate | Status | Ending Value | SPY Ending Value | Sharpe | SPY Sharpe | SPY-Relative IR | CI Low | Mean Turnover |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `e8_scale_0p5` | go | $8,610.66 | $6,115.11 | 4.002253 | 1.320164 | 3.134023 | 0.170819 | 0.026897 |
+
+Artifact:
+`docs/experiments/e8-scale-0p5-contribution-corrected-20260426.json`.
+
+The one-shot ML flow is configured as `e8-scale-0p5-contribution-aware-v1`, which keeps the E8 Ridge
+plus LightGBM blend and applies `ml_score_scale=0.5` before optimization.
 
 CatBoost is now available for continued experimentation, but the first CatBoost batches do not
 justify replacing the Ridge plus LightGBM production path. The next highest-value tests are broader
-rebalance coverage for the current champion and a narrower confirmation sweep around
-`scale=1.10` to `scale=1.20`, where Sharpe difference and SPY-relative IR are both strong.
+rebalance coverage for `e8_scale_0p5` and point-in-time universe/liquidity validation before a
+production promotion is considered durable.

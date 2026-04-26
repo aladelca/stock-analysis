@@ -77,6 +77,13 @@ prices:
   provider: yfinance
   lookback_years: 5
 
+forecast:
+  engine: ml
+  ml_model_version: e8-scale-0p5-contribution-aware-v1
+  ml_horizon_days: 5
+  ml_max_assets: 100
+  ml_score_scale: 0.5
+
 optimizer:
   max_weight: 0.30
   risk_aversion: 10.0
@@ -92,6 +99,8 @@ contributions:
   initial_portfolio_value: 1000.0
   monthly_deposit_amount: 0.0
   deposit_frequency_days: 30
+  deposit_start_date: null
+  rebalance_on_deposit_day: true
 
 execution:
   cash_balance: 0.0
@@ -113,6 +122,10 @@ Notes:
 - `as_of_date: null` means the requested run date is today.
 - Gold `as_of_date` is the latest available price date, not necessarily today.
 - `run_id: null` lets the pipeline generate a UTC run id.
+- `forecast.ml_model_version: e8-scale-0p5-contribution-aware-v1` is the corrected
+  contribution-aware E8 model selected in `docs/experiments/e8-scale-0p5-contribution-corrected-20260426.json`.
+- `forecast.ml_score_scale: 0.5` applies the score scaling required by the selected `e8_scale_0p5`
+  candidate.
 - `portfolio_state.current_holdings_path: null` means first-allocation mode.
 - `contributions.monthly_deposit_amount: 0.0` disables deposit modeling for the one-shot run.
 - `execution.no_trade_band: 0.0` means trades are filtered only by `min_rebalance_trade_weight`.
@@ -163,6 +176,8 @@ contributions:
   initial_portfolio_value: 1000.0
   monthly_deposit_amount: 100.0
   deposit_frequency_days: 30
+  deposit_start_date: null
+  rebalance_on_deposit_day: true
 
 execution:
   cash_balance: 0.0
@@ -175,7 +190,7 @@ on the post-deposit portfolio value.
 
 ## 6. Run The One-Shot Pipeline
 
-The default production config uses the Phase 2 E8 ML forecast engine. To make the
+The default production config uses the corrected `e8_scale_0p5` ML forecast flow. To make the
 forecast choice explicit in operator runs:
 
 ```bash
@@ -252,7 +267,7 @@ root = f"data/runs/{run}"
 meta = pd.read_parquet(f"{root}/gold/run_metadata.parquet")
 features = pd.read_parquet(f"{root}/silver/asset_daily_features.parquet")
 recs = pd.read_parquet(f"{root}/gold/portfolio_recommendations.parquet")
-print(meta[["requested_as_of_date", "data_as_of_date", "as_of_date", "run_id"]].to_string(index=False))
+print(meta[["requested_as_of_date", "data_as_of_date", "as_of_date", "run_id", "forecast_engine", "model_version"]].to_string(index=False))
 print("latest feature date:", features["latest_date"].max())
 print("recommendation as_of_date:", recs["as_of_date"].unique())
 print("weight sum:", recs["target_weight"].sum())
@@ -270,6 +285,8 @@ Expected:
 
 - `data_as_of_date` equals the latest available market price date.
 - Recommendation `as_of_date` equals `data_as_of_date`.
+- `forecast_engine` is `ml`.
+- `model_version` is `e8-scale-0p5-contribution-aware-v1`.
 - `target_weight` sums approximately to `1.0`.
 - `estimated_commission_weight` equals `0.02 * trade_abs_weight` for planned BUY/SELL rows.
 - `commission_amount` equals `0.02 * abs(trade_notional)` for planned BUY/SELL rows.
@@ -349,9 +366,10 @@ Edit `configs/portfolio.local.yaml`:
 ```yaml
 forecast:
   engine: ml
-  ml_model_version: phase2-e8-ridge-lightgbm-blend-v1
+  ml_model_version: e8-scale-0p5-contribution-aware-v1
   ml_horizon_days: 5
   ml_max_assets: 100
+  ml_score_scale: 0.5
 
 optimizer:
   max_weight: 0.30
@@ -449,9 +467,10 @@ Edit `configs/portfolio.local.yaml`:
 ```yaml
 forecast:
   engine: ml
-  ml_model_version: phase2-e8-ridge-lightgbm-blend-v1
+  ml_model_version: e8-scale-0p5-contribution-aware-v1
   ml_horizon_days: 5
   ml_max_assets: 100
+  ml_score_scale: 0.5
 
 optimizer:
   max_weight: 0.30
