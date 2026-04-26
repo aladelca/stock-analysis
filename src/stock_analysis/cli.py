@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Literal, cast
 
+import pandas as pd
 import typer
 from rich import print
 
@@ -28,6 +29,18 @@ from stock_analysis.ml.mlflow_tracking import (
 )
 from stock_analysis.ml.phase2 import Phase2Config, run_phase2
 from stock_analysis.pipeline.one_shot import run_one_shot
+from stock_analysis.storage.contracts import (
+    AccountRecord,
+    AccountTrackingRepository,
+    CashflowRecord,
+    CashflowType,
+    HoldingSnapshotRecord,
+    PortfolioSnapshotRecord,
+)
+from stock_analysis.storage.supabase import (
+    SupabaseConfigError,
+    create_account_tracking_repository,
+)
 from stock_analysis.tableau.export import export_existing_run_for_tableau
 from stock_analysis.tableau.publish import (
     publish_datasource_if_enabled,
@@ -138,6 +151,18 @@ TURNOVER_OBJECTIVE_OPTION = typer.Option(
     "--objective-metric",
     help="Summary metric used to select the best turnover penalty.",
 )
+HOLDINGS_PATH_OPTION = typer.Option(None, "--holdings")
+CASHFLOW_TYPES: set[str] = {
+    "deposit",
+    "withdrawal",
+    "dividend",
+    "interest",
+    "fee",
+    "tax",
+    "transfer",
+}
+INFLOW_CASHFLOW_TYPES = {"deposit", "dividend", "interest"}
+OUTFLOW_CASHFLOW_TYPES = {"withdrawal", "fee", "tax"}
 
 
 @app.command("run-one-shot")
@@ -155,6 +180,163 @@ def run_one_shot_command(
     result = run_one_shot(portfolio_config)
     print(f"[green]Completed run[/green] {result.run_id}")
     print(f"Recommendations: {result.recommendations_path}")
+
+
+@app.command("upsert-account")
+def upsert_account_command(
+    config: Path = CONFIG_OPTION,
+    account_slug: str | None = typer.Option(None, "--account-slug"),
+    display_name: str | None = typer.Option(None, "--display-name"),
+    base_currency: str = typer.Option("USD", "--base-currency"),
+    benchmark_ticker: str = typer.Option("SPY", "--benchmark-ticker"),
+) -> None:
+    cfg = load_config(config)
+    slug = _resolve_account_slug(cfg.live_account.account_slug, account_slug)
+    account = _account_tracking_repository(cfg).upsert_account(
+        AccountRecord(
+            slug=slug,
+            display_name=display_name or slug,
+            base_currency=base_currency.upper(),
+            benchmark_ticker=benchmark_ticker.upper(),
+        )
+    )
+    print(f"[green]Upserted account[/green] {account.slug}")
+    print(f"id: {account.id}")
+
+
+@app.command("register-cashflow")
+def register_cashflow_command(
+    config: Path = CONFIG_OPTION,
+    account_slug: str | None = typer.Option(None, "--account-slug"),
+    cashflow_date: str = typer.Option(..., "--date", help="Cashflow date in YYYY-MM-DD format."),
+    amount: float = typer.Option(..., "--amount", help="Absolute cashflow amount."),
+    cashflow_type: str = typer.Option("deposit", "--type"),
+    settled_date: str | None = typer.Option(None, "--settled-date"),
+    currency: str = typer.Option("USD", "--currency"),
+    source: str = typer.Option("manual", "--source"),
+    external_ref: str | None = typer.Option(None, "--external-ref"),
+    notes: str | None = typer.Option(None, "--notes"),
+    included_in_snapshot_id: str | None = typer.Option(None, "--included-in-snapshot-id"),
+) -> None:
+    cfg = load_config(config)
+    repo = _account_tracking_repository(cfg)
+    account = _require_account(
+        repo, _resolve_account_slug(cfg.live_account.account_slug, account_slug)
+    )
+    parsed_type = _parse_cashflow_type(cashflow_type)
+    inserted = repo.insert_cashflow(
+        CashflowRecord(
+            account_id=account.id or "",
+            cashflow_date=_parse_required_date(cashflow_date, "--date"),
+            settled_date=_parse_date_option(settled_date, "--settled-date"),
+            amount=_normalized_cashflow_amount(parsed_type, amount),
+            cashflow_type=parsed_type,
+            currency=currency.upper(),
+            source=source,
+            external_ref=external_ref,
+            notes=notes,
+            included_in_snapshot_id=included_in_snapshot_id,
+        )
+    )
+    print(f"[green]Registered cashflow[/green] {inserted.id}")
+    print(
+        f"{inserted.cashflow_date.isoformat()} {inserted.cashflow_type} "
+        f"{inserted.amount:.2f} {inserted.currency}"
+    )
+
+
+@app.command("list-cashflows")
+def list_cashflows_command(
+    config: Path = CONFIG_OPTION,
+    account_slug: str | None = typer.Option(None, "--account-slug"),
+    start_date: str | None = typer.Option(None, "--from"),
+    end_date: str | None = typer.Option(None, "--to"),
+) -> None:
+    cfg = load_config(config)
+    repo = _account_tracking_repository(cfg)
+    account = _require_account(
+        repo, _resolve_account_slug(cfg.live_account.account_slug, account_slug)
+    )
+    cashflows = repo.list_cashflows(
+        account.id or "",
+        start_date=_parse_date_option(start_date, "--from"),
+        end_date=_parse_date_option(end_date, "--to"),
+    )
+    if not cashflows:
+        print("[yellow]No cashflows found.[/yellow]")
+        return
+    for cashflow in cashflows:
+        settled = cashflow.settled_date.isoformat() if cashflow.settled_date else "-"
+        print(
+            f"{cashflow.cashflow_date.isoformat()} settled={settled} "
+            f"{cashflow.cashflow_type} {cashflow.amount:.2f} {cashflow.currency} "
+            f"id={cashflow.id}"
+        )
+
+
+@app.command("import-portfolio-snapshot")
+def import_portfolio_snapshot_command(
+    config: Path = CONFIG_OPTION,
+    account_slug: str | None = typer.Option(None, "--account-slug"),
+    snapshot_date: str = typer.Option(..., "--date", help="Snapshot date in YYYY-MM-DD format."),
+    holdings_path: Path | None = HOLDINGS_PATH_OPTION,
+    market_value: float | None = typer.Option(None, "--market-value"),
+    cash_balance: float = typer.Option(0.0, "--cash-balance"),
+    total_value: float | None = typer.Option(None, "--total-value"),
+    currency: str = typer.Option("USD", "--currency"),
+    source: str = typer.Option("manual", "--source"),
+) -> None:
+    cfg = load_config(config)
+    repo = _account_tracking_repository(cfg)
+    account = _require_account(
+        repo, _resolve_account_slug(cfg.live_account.account_slug, account_slug)
+    )
+    holdings = _read_holding_snapshot_rows(holdings_path, currency=currency.upper())
+    resolved_market_value = _resolve_snapshot_market_value(market_value, holdings)
+    resolved_total_value = total_value
+    if resolved_total_value is None:
+        resolved_total_value = resolved_market_value + cash_balance
+    snapshot = repo.insert_portfolio_snapshot(
+        PortfolioSnapshotRecord(
+            account_id=account.id or "",
+            snapshot_date=_parse_required_date(snapshot_date, "--date"),
+            market_value=resolved_market_value,
+            cash_balance=cash_balance,
+            total_value=resolved_total_value,
+            currency=currency.upper(),
+            source=source,
+        ),
+        holdings=holdings,
+    )
+    print(f"[green]Imported portfolio snapshot[/green] {snapshot.id}")
+    print(
+        f"{snapshot.snapshot_date.isoformat()} total={snapshot.total_value:.2f} "
+        f"cash={snapshot.cash_balance:.2f} holdings={len(holdings)}"
+    )
+
+
+@app.command("show-latest-portfolio-snapshot")
+def show_latest_portfolio_snapshot_command(
+    config: Path = CONFIG_OPTION,
+    account_slug: str | None = typer.Option(None, "--account-slug"),
+    as_of_date: str | None = typer.Option(None, "--as-of-date"),
+) -> None:
+    cfg = load_config(config)
+    repo = _account_tracking_repository(cfg)
+    account = _require_account(
+        repo, _resolve_account_slug(cfg.live_account.account_slug, account_slug)
+    )
+    resolved_as_of = _parse_date_option(as_of_date, "--as-of-date") or date.today()
+    snapshot = repo.latest_portfolio_snapshot(account.id or "", as_of_date=resolved_as_of)
+    if snapshot is None:
+        print("[yellow]No portfolio snapshot found.[/yellow]")
+        return
+    holdings = repo.list_holding_snapshots(snapshot.id or "")
+    print(f"[green]Latest portfolio snapshot[/green] {snapshot.id}")
+    print(
+        f"{snapshot.snapshot_date.isoformat()} total={snapshot.total_value:.2f} "
+        f"cash={snapshot.cash_balance:.2f} holdings={len(holdings)}"
+    )
 
 
 @app.command("run-experiment")
@@ -466,3 +648,144 @@ def _parse_date_option(raw: str | None, option_name: str) -> date | None:
     except ValueError as exc:
         print(f"[red]Invalid date for {option_name}: {raw}. Use YYYY-MM-DD.[/red]")
         raise typer.Exit(2) from exc
+
+
+def _parse_required_date(raw: str, option_name: str) -> date:
+    parsed = _parse_date_option(raw, option_name)
+    if parsed is None:
+        print(f"[red]Provide {option_name} in YYYY-MM-DD format.[/red]")
+        raise typer.Exit(2)
+    return parsed
+
+
+def _account_tracking_repository(config) -> AccountTrackingRepository:
+    load_local_env()
+    try:
+        return create_account_tracking_repository(config.supabase)
+    except SupabaseConfigError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+
+def _resolve_account_slug(config_slug: str | None, override_slug: str | None) -> str:
+    slug = override_slug or config_slug
+    if not slug:
+        print("[red]Provide --account-slug or set live_account.account_slug in the config.[/red]")
+        raise typer.Exit(2)
+    return slug
+
+
+def _require_account(repository: AccountTrackingRepository, slug: str) -> AccountRecord:
+    account = repository.get_account_by_slug(slug)
+    if account is None:
+        print(f"[red]Account does not exist in Supabase: {slug}. Run upsert-account first.[/red]")
+        raise typer.Exit(2)
+    if account.id is None:
+        print(f"[red]Account row for {slug} did not include an id.[/red]")
+        raise typer.Exit(2)
+    return account
+
+
+def _parse_cashflow_type(raw: str) -> CashflowType:
+    parsed = raw.strip().lower()
+    if parsed not in CASHFLOW_TYPES:
+        allowed = ", ".join(sorted(CASHFLOW_TYPES))
+        print(f"[red]Invalid --type: {raw}. Allowed values: {allowed}.[/red]")
+        raise typer.Exit(2)
+    return cast(CashflowType, parsed)
+
+
+def _normalized_cashflow_amount(cashflow_type: CashflowType, amount: float) -> float:
+    if amount == 0:
+        print("[red]Cashflow amount cannot be zero.[/red]")
+        raise typer.Exit(2)
+    if cashflow_type in INFLOW_CASHFLOW_TYPES:
+        return abs(float(amount))
+    if cashflow_type in OUTFLOW_CASHFLOW_TYPES:
+        return -abs(float(amount))
+    return float(amount)
+
+
+def _read_holding_snapshot_rows(
+    holdings_path: Path | None,
+    *,
+    currency: str,
+) -> list[HoldingSnapshotRecord]:
+    if holdings_path is None:
+        return []
+    if not holdings_path.exists():
+        print(f"[red]Holdings file does not exist: {holdings_path}[/red]")
+        raise typer.Exit(2)
+    holdings = _read_snapshot_frame(holdings_path)
+    required_columns = {"ticker", "market_value"}
+    missing = required_columns - set(holdings.columns)
+    if missing:
+        print(f"[red]Holdings file is missing columns: {sorted(missing)}[/red]")
+        raise typer.Exit(2)
+    market_values = pd.to_numeric(holdings["market_value"], errors="coerce")
+    if market_values.isna().any() or market_values.lt(0).any():
+        print("[red]Holdings market_value must be nonnegative numbers.[/red]")
+        raise typer.Exit(2)
+    quantities = _optional_numeric_series(holdings, "quantity")
+    prices = _optional_numeric_series(holdings, "price")
+    rows: list[HoldingSnapshotRecord] = []
+    normalized = holdings.reset_index(drop=True)
+    for index in range(len(normalized)):
+        ticker = str(normalized.at[index, "ticker"]).strip()
+        if not ticker:
+            print("[red]Holdings ticker values cannot be blank.[/red]")
+            raise typer.Exit(2)
+        rows.append(
+            HoldingSnapshotRecord(
+                snapshot_id="pending",
+                ticker=ticker,
+                market_value=float(market_values.iloc[index]),
+                quantity=_optional_series_value(quantities, index),
+                price=_optional_series_value(prices, index),
+                currency=currency,
+            )
+        )
+    return rows
+
+
+def _read_snapshot_frame(path: Path) -> pd.DataFrame:
+    if path.suffix.lower() == ".csv":
+        return pd.read_csv(path)
+    if path.suffix.lower() in {".parquet", ".pq"}:
+        return pd.read_parquet(path)
+    print(f"[red]Unsupported holdings file format: {path.suffix}. Use CSV or Parquet.[/red]")
+    raise typer.Exit(2)
+
+
+def _optional_numeric_series(frame: pd.DataFrame, column: str) -> pd.Series | None:
+    if column not in frame.columns:
+        return None
+    values = pd.to_numeric(frame[column], errors="coerce")
+    if values.dropna().lt(0).any():
+        print(f"[red]Holdings {column} values cannot be negative.[/red]")
+        raise typer.Exit(2)
+    return values
+
+
+def _optional_series_value(values: pd.Series | None, index: int) -> float | None:
+    if values is None:
+        return None
+    value = values.iloc[index]
+    if pd.isna(value):
+        return None
+    return float(value)
+
+
+def _resolve_snapshot_market_value(
+    market_value: float | None,
+    holdings: list[HoldingSnapshotRecord],
+) -> float:
+    if market_value is not None:
+        if market_value < 0:
+            print("[red]--market-value cannot be negative.[/red]")
+            raise typer.Exit(2)
+        return market_value
+    if holdings:
+        return float(sum(holding.market_value for holding in holdings))
+    print("[red]Provide --market-value or --holdings.[/red]")
+    raise typer.Exit(2)
