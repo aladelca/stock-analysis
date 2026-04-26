@@ -211,6 +211,16 @@ class FakeAccountTrackingRepository:
         del account_id, as_of_date
         return self.snapshot
 
+    def list_portfolio_snapshots(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[PortfolioSnapshotRecord]:
+        del account_id, start_date, end_date
+        return [self.snapshot] if self.snapshot is not None else []
+
     def list_holding_snapshots(self, snapshot_id: str) -> list[HoldingSnapshotRecord]:
         return [holding for holding in self.holdings if holding.snapshot_id == snapshot_id]
 

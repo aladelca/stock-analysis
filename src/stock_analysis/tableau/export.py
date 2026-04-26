@@ -18,6 +18,14 @@ TABLEAU_CSV_TABLES: tuple[tuple[str, str], ...] = (
     ("gold", "sector_exposure"),
     ("gold", "run_metadata"),
 )
+TABLEAU_OPTIONAL_CSV_TABLES: tuple[tuple[str, str], ...] = (
+    ("gold", "cashflows"),
+    ("gold", "portfolio_snapshots"),
+    ("gold", "holding_snapshots"),
+    ("gold", "recommendation_runs"),
+    ("gold", "recommendation_lines"),
+    ("gold", "performance_snapshots"),
+)
 
 
 def export_existing_run_for_tableau(config: PortfolioConfig, run_id: str) -> dict[str, Path]:
@@ -34,13 +42,22 @@ def export_existing_run_for_tableau(config: PortfolioConfig, run_id: str) -> dic
                 pd.read_parquet(parquet_path),
                 paths.csv_mirror_path(layer, name),
             )
+        for layer, name in TABLEAU_OPTIONAL_CSV_TABLES:
+            parquet_path = _table_path(paths, layer, name)
+            if parquet_path.exists():
+                outputs[f"{layer}.{name}.csv"] = write_csv(
+                    pd.read_parquet(parquet_path),
+                    paths.csv_mirror_path(layer, name),
+                )
 
     if config.tableau.export_hyper:
+        performance_snapshots = _read_optional_gold_table(paths, "performance_snapshots")
         dashboard_mart = build_dashboard_mart(
             _read_gold_table(paths, "portfolio_recommendations"),
             _read_gold_table(paths, "portfolio_risk_metrics"),
             _read_gold_table(paths, "sector_exposure"),
             _read_gold_table(paths, "run_metadata"),
+            performance_snapshots=performance_snapshots,
         )
         hyper_path = paths.gold_path("tableau_dashboard_mart", "hyper")
         exported = export_hyper_if_available(dashboard_mart, hyper_path)
@@ -66,4 +83,11 @@ def _read_gold_table(paths: ProjectPaths, name: str) -> pd.DataFrame:
     if not parquet_path.exists():
         msg = f"Cannot export Tableau Hyper; missing existing run table: {parquet_path}"
         raise FileNotFoundError(msg)
+    return pd.read_parquet(parquet_path)
+
+
+def _read_optional_gold_table(paths: ProjectPaths, name: str) -> pd.DataFrame | None:
+    parquet_path = paths.gold_path(name)
+    if not parquet_path.exists():
+        return None
     return pd.read_parquet(parquet_path)

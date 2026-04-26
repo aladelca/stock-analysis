@@ -142,6 +142,14 @@ class AccountTrackingRepository(Protocol):
         as_of_date: date,
     ) -> PortfolioSnapshotRecord | None: ...
 
+    def list_portfolio_snapshots(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[PortfolioSnapshotRecord]: ...
+
     def list_holding_snapshots(self, snapshot_id: str) -> list[HoldingSnapshotRecord]: ...
 
     def insert_recommendation_run(

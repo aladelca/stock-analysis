@@ -118,6 +118,16 @@ def test_one_shot_pipeline_uses_actual_live_cashflows(
         Path(result.output_root) / "gold" / "portfolio_recommendations.parquet"
     )
     metadata = pd.read_parquet(Path(result.output_root) / "gold" / "run_metadata.parquet")
+    cashflows = pd.read_parquet(Path(result.output_root) / "gold" / "cashflows.parquet")
+    performance = pd.read_parquet(
+        Path(result.output_root) / "gold" / "performance_snapshots.parquet"
+    )
+    recommendation_runs = pd.read_parquet(
+        Path(result.output_root) / "gold" / "recommendation_runs.parquet"
+    )
+    recommendation_lines = pd.read_parquet(
+        Path(result.output_root) / "gold" / "recommendation_lines.parquet"
+    )
 
     assert recommendations["contribution_amount"].max() == pytest.approx(200.0)
     assert recommendations["portfolio_value_before_contribution"].max() == pytest.approx(1000.0)
@@ -125,6 +135,14 @@ def test_one_shot_pipeline_uses_actual_live_cashflows(
     assert metadata["live_cashflow_source"].iat[0] == "actual"
     assert metadata["live_account_slug"].iat[0] == "main"
     assert metadata["live_unapplied_cashflow_amount"].iat[0] == pytest.approx(200.0)
+    assert cashflows["is_applied_to_recommendation"].tolist() == [True]
+    assert recommendation_runs["unapplied_cashflow_amount"].iat[0] == pytest.approx(200.0)
+    assert recommendation_lines["recommendation_key"].str.startswith("test-run:").all()
+    assert "spy_same_cashflow_value" in performance.columns
+
+    exports = export_existing_run_for_tableau(sample_config, "test-run")
+    assert "gold.cashflows.csv" in exports
+    assert "gold.performance_snapshots.csv" in exports
 
 
 def test_export_existing_run_for_tableau_does_not_rerun_pipeline(
@@ -286,6 +304,16 @@ class FakeAccountTrackingRepository:
     ) -> PortfolioSnapshotRecord | None:
         del account_id, as_of_date
         return self.snapshot
+
+    def list_portfolio_snapshots(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[PortfolioSnapshotRecord]:
+        del account_id, start_date, end_date
+        return [self.snapshot]
 
     def list_holding_snapshots(self, snapshot_id: str) -> list[HoldingSnapshotRecord]:
         return [holding for holding in self.holdings if holding.snapshot_id == snapshot_id]

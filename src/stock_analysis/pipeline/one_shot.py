@@ -40,6 +40,7 @@ from stock_analysis.portfolio.live_state import LivePortfolioState, build_live_p
 from stock_analysis.portfolio.rebalance import build_rebalance_context
 from stock_analysis.storage.contracts import AccountTrackingRepository
 from stock_analysis.storage.supabase import create_account_tracking_repository
+from stock_analysis.tableau.account_tracking_marts import build_account_tracking_marts
 from stock_analysis.tableau.dashboard_mart import build_dashboard_mart
 from stock_analysis.tableau.hyper import export_hyper_if_available
 
@@ -218,6 +219,17 @@ def run_one_shot(
     _write_gold_with_csv(paths, "portfolio_risk_metrics", risk_metrics)
     _write_gold_with_csv(paths, "sector_exposure", sector_exposure)
     _write_gold_with_csv(paths, "run_metadata", run_metadata)
+    account_tracking_tables: dict[str, pd.DataFrame] = {}
+    if live_state is not None:
+        account_tracking_tables = build_account_tracking_marts(
+            live_state=live_state,
+            recommendations=recommendations,
+            run_metadata=run_metadata,
+            spy_daily=spy_daily,
+            commission_rate=config.optimizer.commission_rate,
+        )
+        for name, table in account_tracking_tables.items():
+            _write_gold_with_csv(paths, name, table)
 
     artifact_paths = [
         paths.gold_path("portfolio_recommendations"),
@@ -231,6 +243,13 @@ def run_one_shot(
         paths.gold_path("optimizer_input"),
         paths.gold_path("covariance_matrix"),
     ]
+    for name in account_tracking_tables:
+        artifact_paths.extend(
+            [
+                paths.gold_path(name),
+                paths.csv_mirror_path("gold", name),
+            ]
+        )
 
     if config.tableau.export_hyper:
         hyper_path = paths.gold_path("tableau_dashboard_mart", "hyper")
@@ -239,6 +258,7 @@ def run_one_shot(
             risk_metrics,
             sector_exposure,
             run_metadata,
+            performance_snapshots=account_tracking_tables.get("performance_snapshots"),
         )
         exported = export_hyper_if_available(
             dashboard_mart,

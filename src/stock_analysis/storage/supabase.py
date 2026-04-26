@@ -145,6 +145,25 @@ class SupabaseAccountTrackingRepository:
             return None
         return _portfolio_snapshot_from_row(response.data[0])
 
+    def list_portfolio_snapshots(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[PortfolioSnapshotRecord]:
+        query = (
+            self._table(self._config.portfolio_snapshots_table)
+            .select("*")
+            .eq("account_id", account_id)
+        )
+        if start_date is not None:
+            query = query.gte("snapshot_date", start_date.isoformat())
+        if end_date is not None:
+            query = query.lte("snapshot_date", end_date.isoformat())
+        response = _execute(query.order("snapshot_date").order("created_at"))
+        return [_portfolio_snapshot_from_row(row) for row in response.data or []]
+
     def list_holding_snapshots(self, snapshot_id: str) -> list[HoldingSnapshotRecord]:
         response = _execute(
             self._table(self._config.holding_snapshots_table)

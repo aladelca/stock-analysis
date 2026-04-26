@@ -10,6 +10,7 @@ from stock_analysis.storage.contracts import (
     AccountRecord,
     AccountTrackingRepository,
     CashflowRecord,
+    HoldingSnapshotRecord,
     PortfolioSnapshotRecord,
 )
 
@@ -21,6 +22,9 @@ class LivePortfolioState:
     state: PortfolioState
     contribution_amount: float
     applied_cashflows: list[CashflowRecord]
+    cashflows: list[CashflowRecord]
+    snapshots: list[PortfolioSnapshotRecord]
+    holdings: list[HoldingSnapshotRecord]
 
     @property
     def net_cashflow_amount(self) -> float:
@@ -44,9 +48,16 @@ def build_live_portfolio_state(
         msg = "Latest portfolio snapshot does not include an id."
         raise ValueError(msg)
 
+    cashflows = repository.list_cashflows(
+        account.id,
+        end_date=as_of_date,
+    )
+    snapshots = repository.list_portfolio_snapshots(
+        account.id,
+        end_date=as_of_date,
+    )
     unapplied_cashflows = _unapplied_cashflows_after_snapshot(
-        repository,
-        account_id=account.id,
+        cashflows,
         snapshot=snapshot,
         as_of_date=as_of_date,
     )
@@ -78,26 +89,24 @@ def build_live_portfolio_state(
         ),
         contribution_amount=net_cashflow,
         applied_cashflows=unapplied_cashflows,
+        cashflows=cashflows,
+        snapshots=snapshots,
+        holdings=holdings,
     )
 
 
 def _unapplied_cashflows_after_snapshot(
-    repository: AccountTrackingRepository,
+    cashflows: list[CashflowRecord],
     *,
-    account_id: str,
     snapshot: PortfolioSnapshotRecord,
     as_of_date: date,
 ) -> list[CashflowRecord]:
     start_date = snapshot.snapshot_date + timedelta(days=1)
-    cashflows = repository.list_cashflows(
-        account_id,
-        start_date=start_date,
-        end_date=as_of_date,
-    )
     return [
         cashflow
         for cashflow in cashflows
         if cashflow.included_in_snapshot_id is None and _is_settled(cashflow, as_of_date)
+        if cashflow.cashflow_date >= start_date and cashflow.cashflow_date <= as_of_date
     ]
 
 

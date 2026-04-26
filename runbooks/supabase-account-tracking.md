@@ -127,3 +127,16 @@ uv run --extra supabase stock-analysis run-one-shot \
 ```
 
 If withdrawals, fees, or taxes create a negative net cashflow after the latest snapshot, import a fresh snapshot before running recommendations. This prevents the live flow from estimating post-withdrawal holdings incorrectly.
+
+The live run writes the standard recommendation outputs plus these Tableau-ready gold tables:
+
+- `cashflows`
+- `portfolio_snapshots`
+- `holding_snapshots`
+- `recommendation_runs`
+- `recommendation_lines`
+- `performance_snapshots`
+
+CSV mirrors are written under `data/runs/<run_id>/gold/csv/`. `export-tableau` also mirrors these tables when they exist in an existing run.
+
+`performance_snapshots` uses actual imported portfolio snapshots as valuation points. If you want return tracking to be meaningful, import a fresh snapshot after market close before running the recommendation flow. Cashflows after the latest snapshot are still used for recommendations, but they are not a substitute for an updated valuation snapshot.

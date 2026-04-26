@@ -2,16 +2,25 @@ from __future__ import annotations
 
 import pandas as pd
 
+from stock_analysis.tableau.account_tracking_marts import latest_performance_fields
+
 
 def build_dashboard_mart(
     recommendations: pd.DataFrame,
     risk_metrics: pd.DataFrame,
     sector_exposure: pd.DataFrame,
     run_metadata: pd.DataFrame,
+    *,
+    performance_snapshots: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     mart = recommendations.copy()
     risk_wide = _risk_metrics_wide(risk_metrics)
     metadata = _single_row_metadata(run_metadata)
+    performance = (
+        latest_performance_fields(performance_snapshots)
+        if performance_snapshots is not None
+        else {}
+    )
 
     mart["selected"] = pd.to_numeric(mart["target_weight"], errors="coerce").fillna(0.0).gt(0)
     mart["forecast_score"] = mart["expected_return"]
@@ -29,6 +38,8 @@ def build_dashboard_mart(
         mart[f"portfolio_{column}"] = metric_value
     for column, metadata_value in metadata.items():
         mart[f"run_{column}"] = metadata_value
+    for column, performance_value in performance.items():
+        mart[column] = [performance_value] * len(mart)  # type: ignore[assignment]
 
     mart["portfolio_return_per_vol"] = _safe_ratio(
         mart.get("portfolio_expected_return"),
@@ -93,8 +104,25 @@ def build_dashboard_mart(
         "portfolio_num_holdings",
         "portfolio_max_weight",
         "portfolio_concentration_hhi",
+        "account_total_value",
+        "account_total_deposits",
+        "account_net_external_cashflow",
+        "account_time_weighted_return",
+        "account_money_weighted_return",
+        "spy_same_cashflow_value",
+        "spy_time_weighted_return",
+        "spy_money_weighted_return",
+        "active_value",
+        "active_return",
         "run_requested_as_of_date",
         "run_data_as_of_date",
+        "run_live_account_enabled",
+        "run_live_account_slug",
+        "run_live_cashflow_source",
+        "run_live_snapshot_id",
+        "run_live_snapshot_date",
+        "run_live_unapplied_cashflow_amount",
+        "run_live_unapplied_cashflow_count",
         "is_data_date_lagged",
         "data_date_status",
         "run_created_at_utc",
@@ -126,7 +154,20 @@ def _single_row_metadata(run_metadata: pd.DataFrame) -> dict[str, str]:
     return {
         key: str(value)
         for key, value in row.items()
-        if key in {"requested_as_of_date", "data_as_of_date", "created_at_utc", "config_hash"}
+        if key
+        in {
+            "requested_as_of_date",
+            "data_as_of_date",
+            "created_at_utc",
+            "config_hash",
+            "live_account_enabled",
+            "live_account_slug",
+            "live_cashflow_source",
+            "live_snapshot_id",
+            "live_snapshot_date",
+            "live_unapplied_cashflow_amount",
+            "live_unapplied_cashflow_count",
+        }
     }
 
 

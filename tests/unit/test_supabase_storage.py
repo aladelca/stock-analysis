@@ -106,6 +106,8 @@ def test_repository_writes_snapshot_and_holding_rows() -> None:
     assert snapshot.id == "portfolio_snapshots-1"
     latest = repo.latest_portfolio_snapshot("account-1", as_of_date=date(2026, 4, 30))
     assert latest == snapshot
+    snapshots = repo.list_portfolio_snapshots("account-1", end_date=date(2026, 4, 30))
+    assert snapshots == [snapshot]
 
     holdings = repo.list_holding_snapshots(snapshot.id or "")
     assert holdings == [
