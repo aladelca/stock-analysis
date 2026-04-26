@@ -1,6 +1,6 @@
 # Supabase Account Tracking
 
-This runbook covers the implemented account-tracking foundation. Live one-shot recommendations are not wired to actual Supabase cashflows yet; that work is tracked by `stock-analysis-1kn`.
+This runbook covers Supabase-backed account setup, cashflow registration, portfolio snapshots, and live one-shot recommendations that use actual cashflows.
 
 ## Setup
 
@@ -116,6 +116,14 @@ uv run --extra supabase stock-analysis show-latest-portfolio-snapshot \
   --as-of-date 2026-04-24
 ```
 
-## Current Limitation
+## Run Live Recommendations
 
-The database and registration commands are ready, but `run-one-shot` still uses the current scenario-style contribution setting. The next implementation step is to load the latest Supabase snapshot plus unapplied settled cashflows and pass that live state into the recommendation flow.
+When `live_account.cashflow_source: actual` is set, `run-one-shot` loads the latest portfolio snapshot on or before the market data date, applies settled cashflows after that snapshot, and uses that amount as the rebalance contribution. The monthly deposit assumption remains for backtesting and scenario mode.
+
+```bash
+uv run --extra supabase stock-analysis run-one-shot \
+  --config configs/portfolio.local.yaml \
+  --forecast-engine ml
+```
+
+If withdrawals, fees, or taxes create a negative net cashflow after the latest snapshot, import a fresh snapshot before running recommendations. This prevents the live flow from estimating post-withdrawal holdings incorrectly.

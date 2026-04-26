@@ -10,6 +10,7 @@ import pandas as pd
 from stock_analysis.benchmarks.spy import build_benchmark_returns, build_spy_daily
 from stock_analysis.config import PortfolioConfig
 from stock_analysis.domain.models import PipelineResult
+from stock_analysis.env import load_local_env
 from stock_analysis.features.panel import compute_asset_feature_panel
 from stock_analysis.features.price_features import compute_asset_daily_features
 from stock_analysis.forecasting.baseline import build_optimizer_inputs
@@ -35,7 +36,10 @@ from stock_analysis.optimization.recommendations import (
 )
 from stock_analysis.paths import ProjectPaths
 from stock_analysis.portfolio.holdings import PortfolioState, load_portfolio_state
+from stock_analysis.portfolio.live_state import LivePortfolioState, build_live_portfolio_state
 from stock_analysis.portfolio.rebalance import build_rebalance_context
+from stock_analysis.storage.contracts import AccountTrackingRepository
+from stock_analysis.storage.supabase import create_account_tracking_repository
 from stock_analysis.tableau.dashboard_mart import build_dashboard_mart
 from stock_analysis.tableau.hyper import export_hyper_if_available
 
@@ -47,6 +51,7 @@ def run_one_shot(
     *,
     universe_html: str | None = None,
     price_provider: PriceProvider | None = None,
+    account_repository: AccountTrackingRepository | None = None,
 ) -> PipelineResult:
     requested_as_of_date = config.run.as_of_date or date.today()
     run_id = config.run.run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -161,12 +166,16 @@ def run_one_shot(
     write_csv(optimizer_input, paths.csv_mirror_path("gold", "optimizer_input"))
     covariance.to_parquet(paths.gold_path("covariance_matrix"))
 
-    portfolio_state = _load_portfolio_state(config)
+    portfolio_state, contribution_amount, live_state = _load_rebalance_state(
+        config,
+        data_as_of_date=data_as_of_date,
+        account_repository=account_repository,
+    )
     context_tickers = _rebalance_context_tickers(optimizer_input, portfolio_state)
     rebalance_context = build_rebalance_context(
         portfolio_state,
         context_tickers,
-        contribution_amount=config.contributions.monthly_deposit_amount,
+        contribution_amount=contribution_amount,
     )
     current_weights = rebalance_context.current_weights.reindex(
         optimizer_input["ticker"].astype(str)
@@ -202,6 +211,7 @@ def run_one_shot(
         data_as_of_date,
         constituents,
         daily_prices,
+        live_state=live_state,
     )
 
     _write_gold_with_csv(paths, "portfolio_recommendations", recommendations)
@@ -284,6 +294,43 @@ def _load_portfolio_state(config: PortfolioConfig) -> PortfolioState:
     )
 
 
+def _load_rebalance_state(
+    config: PortfolioConfig,
+    *,
+    data_as_of_date: date,
+    account_repository: AccountTrackingRepository | None,
+) -> tuple[PortfolioState, float, LivePortfolioState | None]:
+    if config.live_account.cashflow_source != "actual":
+        return _load_portfolio_state(config), config.contributions.monthly_deposit_amount, None
+    if not config.live_account.enabled:
+        msg = "Set live_account.enabled=true when live_account.cashflow_source is actual."
+        raise ValueError(msg)
+    if not config.live_account.account_slug:
+        msg = "Set live_account.account_slug when live_account.cashflow_source is actual."
+        raise ValueError(msg)
+
+    repository = account_repository
+    if repository is None:
+        load_local_env()
+        repository = create_account_tracking_repository(config.supabase)
+    account = repository.get_account_by_slug(config.live_account.account_slug)
+    if account is None:
+        msg = f"Supabase account does not exist: {config.live_account.account_slug}"
+        raise ValueError(msg)
+    live_state = build_live_portfolio_state(
+        repository,
+        account,
+        as_of_date=data_as_of_date,
+    )
+    logger.info(
+        "Loaded live account %s snapshot %s with %.2f unapplied cashflow",
+        account.slug,
+        live_state.snapshot.snapshot_date.isoformat(),
+        live_state.contribution_amount,
+    )
+    return live_state.state, live_state.contribution_amount, live_state
+
+
 def _rebalance_context_tickers(
     optimizer_input: pd.DataFrame,
     portfolio_state: PortfolioState,
@@ -303,6 +350,8 @@ def _build_run_metadata(
     data_as_of_date: date,
     constituents: pd.DataFrame,
     daily_prices: pd.DataFrame,
+    *,
+    live_state: LivePortfolioState | None = None,
 ) -> pd.DataFrame:
     config_json = config.model_dump_json(exclude={"run": {"as_of_date"}})
     config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
@@ -325,6 +374,19 @@ def _build_run_metadata(
             str(config.portfolio_state.current_holdings_path)
             if config.portfolio_state.current_holdings_path is not None
             else ""
+        ),
+        "live_account_enabled": config.live_account.enabled,
+        "live_account_slug": config.live_account.account_slug or "",
+        "live_cashflow_source": config.live_account.cashflow_source,
+        "live_snapshot_id": live_state.snapshot.id if live_state is not None else "",
+        "live_snapshot_date": (
+            live_state.snapshot.snapshot_date.isoformat() if live_state is not None else ""
+        ),
+        "live_unapplied_cashflow_amount": (
+            live_state.net_cashflow_amount if live_state is not None else 0.0
+        ),
+        "live_unapplied_cashflow_count": (
+            len(live_state.applied_cashflows) if live_state is not None else 0
         ),
         "universe_count": int(len(constituents)),
         "price_row_count": int(len(daily_prices)),

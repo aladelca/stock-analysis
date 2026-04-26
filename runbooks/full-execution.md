@@ -127,7 +127,10 @@ Notes:
 - `forecast.ml_score_scale: 0.5` applies the score scaling required by the selected `e8_scale_0p5`
   candidate.
 - `portfolio_state.current_holdings_path: null` means first-allocation mode.
-- `contributions.monthly_deposit_amount: 0.0` disables deposit modeling for the one-shot run.
+- `contributions.monthly_deposit_amount: 0.0` disables scenario-mode deposit modeling for the
+  one-shot run. Backtests and autoresearch still use the monthly deposit assumption when supplied.
+- For live account tracking with arbitrary-date deposits, use the Supabase flow in
+  `runbooks/supabase-account-tracking.md` and set `live_account.cashflow_source: actual`.
 - `execution.no_trade_band: 0.0` means trades are filtered only by `min_rebalance_trade_weight`.
 - `optimizer.commission_rate: 0.02` charges 2% of absolute traded portfolio weight.
 - `mlflow.enabled: true` logs parameters, recommendation metrics, risk metrics, and gold artifacts.
@@ -169,7 +172,7 @@ If `market_value` is supplied, the pipeline normalizes values into weights. If n
 configured, the run answers "how to allocate new money" rather than "what to trade from my current
 book."
 
-To model a one-shot deposit, set the contribution amount:
+To model a scenario-mode one-shot deposit, set the contribution amount:
 
 ```yaml
 contributions:

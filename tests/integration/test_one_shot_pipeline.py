@@ -19,6 +19,15 @@ from stock_analysis.config import (
 )
 from stock_analysis.ingestion.prices import PriceDownload
 from stock_analysis.pipeline.one_shot import run_one_shot
+from stock_analysis.storage.contracts import (
+    AccountRecord,
+    CashflowRecord,
+    HoldingSnapshotRecord,
+    PerformanceSnapshotRecord,
+    PortfolioSnapshotRecord,
+    RecommendationLineRecord,
+    RecommendationRunRecord,
+)
 from stock_analysis.tableau.export import export_existing_run_for_tableau
 
 
@@ -85,6 +94,37 @@ def test_one_shot_pipeline_emits_sell_for_current_holding_outside_universe(
     assert zzz["target_weight"] == 0
     assert zzz["trade_weight"] == pytest.approx(-0.10)
     assert zzz["estimated_commission_weight"] == pytest.approx(0.002)
+
+
+def test_one_shot_pipeline_uses_actual_live_cashflows(
+    sample_html,
+    sample_config,
+    static_price_provider,
+) -> None:
+    sample_config.live_account.enabled = True
+    sample_config.live_account.account_slug = "main"
+    sample_config.live_account.cashflow_source = "actual"
+    sample_config.contributions.monthly_deposit_amount = 999.0
+    repository = FakeAccountTrackingRepository()
+
+    result = run_one_shot(
+        sample_config,
+        universe_html=sample_html,
+        price_provider=static_price_provider,
+        account_repository=repository,
+    )
+
+    recommendations = pd.read_parquet(
+        Path(result.output_root) / "gold" / "portfolio_recommendations.parquet"
+    )
+    metadata = pd.read_parquet(Path(result.output_root) / "gold" / "run_metadata.parquet")
+
+    assert recommendations["contribution_amount"].max() == pytest.approx(200.0)
+    assert recommendations["portfolio_value_before_contribution"].max() == pytest.approx(1000.0)
+    assert recommendations["portfolio_value_after_contribution"].max() == pytest.approx(1200.0)
+    assert metadata["live_cashflow_source"].iat[0] == "actual"
+    assert metadata["live_account_slug"].iat[0] == "main"
+    assert metadata["live_unapplied_cashflow_amount"].iat[0] == pytest.approx(200.0)
 
 
 def test_export_existing_run_for_tableau_does_not_rerun_pipeline(
@@ -175,6 +215,95 @@ def test_one_shot_pipeline_can_use_ml_forecast_engine(sample_html, tmp_path: Pat
     assert recommendations["target_weight"].sum() == pytest.approx(1.0)
     assert metadata["forecast_engine"].iat[0] == "ml"
     assert not bool(metadata["expected_return_is_calibrated"].iat[0])
+
+
+class FakeAccountTrackingRepository:
+    def __init__(self) -> None:
+        self.account = AccountRecord(id="account-1", slug="main", display_name="Main")
+        self.snapshot = PortfolioSnapshotRecord(
+            id="snapshot-1",
+            account_id="account-1",
+            snapshot_date=date(2026, 2, 20),
+            market_value=600.0,
+            cash_balance=400.0,
+            total_value=1000.0,
+        )
+        self.holdings = [
+            HoldingSnapshotRecord(
+                snapshot_id="snapshot-1",
+                ticker="AAA",
+                market_value=600.0,
+            )
+        ]
+        self.cashflows = [
+            CashflowRecord(
+                account_id="account-1",
+                cashflow_date=date(2026, 2, 24),
+                amount=200.0,
+                cashflow_type="deposit",
+            )
+        ]
+
+    def get_account_by_slug(self, slug: str) -> AccountRecord | None:
+        if slug == self.account.slug:
+            return self.account
+        return None
+
+    def upsert_account(self, account: AccountRecord) -> AccountRecord:
+        return account
+
+    def insert_cashflow(self, cashflow: CashflowRecord) -> CashflowRecord:
+        return cashflow
+
+    def list_cashflows(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[CashflowRecord]:
+        del account_id
+        rows = self.cashflows
+        if start_date is not None:
+            rows = [row for row in rows if row.cashflow_date >= start_date]
+        if end_date is not None:
+            rows = [row for row in rows if row.cashflow_date <= end_date]
+        return rows
+
+    def insert_portfolio_snapshot(
+        self,
+        snapshot: PortfolioSnapshotRecord,
+        holdings: list[HoldingSnapshotRecord] | None = None,
+    ) -> PortfolioSnapshotRecord:
+        del holdings
+        return snapshot
+
+    def latest_portfolio_snapshot(
+        self,
+        account_id: str,
+        *,
+        as_of_date: date,
+    ) -> PortfolioSnapshotRecord | None:
+        del account_id, as_of_date
+        return self.snapshot
+
+    def list_holding_snapshots(self, snapshot_id: str) -> list[HoldingSnapshotRecord]:
+        return [holding for holding in self.holdings if holding.snapshot_id == snapshot_id]
+
+    def insert_recommendation_run(self, run: RecommendationRunRecord) -> RecommendationRunRecord:
+        return run
+
+    def insert_recommendation_lines(
+        self,
+        lines: list[RecommendationLineRecord],
+    ) -> list[RecommendationLineRecord]:
+        return lines
+
+    def insert_performance_snapshot(
+        self,
+        snapshot: PerformanceSnapshotRecord,
+    ) -> PerformanceSnapshotRecord:
+        return snapshot
 
 
 class _LongStaticPriceProvider:
