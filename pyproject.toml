@@ -34,6 +34,9 @@ prepgen = [
 mlflow = [
   "mlflow>=3.11.1",
 ]
+supabase = [
+  "supabase>=2.15.0",
+]
 
 [project.scripts]
 stock-analysis = "stock_analysis.cli:app"

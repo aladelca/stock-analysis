@@ -12,4 +12,9 @@ def test_load_config_defaults_from_yaml(tmp_path: Path) -> None:
     config = load_config(config_path)
 
     assert config.optimizer.max_weight == 0.2
+    assert config.live_account.enabled is False
+    assert config.live_account.cashflow_source == "scenario"
+    assert config.supabase.enabled is False
+    assert config.supabase.url_env == "SUPABASE_URL"
+    assert config.supabase.key_env == "SUPABASE_SERVICE_ROLE_KEY"
     assert config.tableau.publish_enabled is False

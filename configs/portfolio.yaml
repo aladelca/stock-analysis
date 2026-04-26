@@ -70,6 +70,24 @@ execution:
   cash_balance: 0.0
   no_trade_band: 0.0
 
+live_account:
+  enabled: false
+  account_slug: null
+  cashflow_source: scenario
+
+supabase:
+  enabled: false
+  url_env: SUPABASE_URL
+  key_env: SUPABASE_SERVICE_ROLE_KEY
+  schema_name: public
+  accounts_table: accounts
+  cashflows_table: cashflows
+  portfolio_snapshots_table: portfolio_snapshots
+  holding_snapshots_table: holding_snapshots
+  recommendation_runs_table: recommendation_runs
+  recommendation_lines_table: recommendation_lines
+  performance_snapshots_table: performance_snapshots
+
 tableau:
   export_csv: true
   export_hyper: false

@@ -121,6 +121,26 @@ class ExecutionConfig(BaseModel):
     no_trade_band: float = Field(default=0.0, ge=0, le=1)
 
 
+class LiveAccountConfig(BaseModel):
+    enabled: bool = False
+    account_slug: str | None = None
+    cashflow_source: Literal["scenario", "actual"] = "scenario"
+
+
+class SupabaseConfig(BaseModel):
+    enabled: bool = False
+    url_env: str = "SUPABASE_URL"
+    key_env: str = "SUPABASE_SERVICE_ROLE_KEY"
+    schema_name: str = "public"
+    accounts_table: str = "accounts"
+    cashflows_table: str = "cashflows"
+    portfolio_snapshots_table: str = "portfolio_snapshots"
+    holding_snapshots_table: str = "holding_snapshots"
+    recommendation_runs_table: str = "recommendation_runs"
+    recommendation_lines_table: str = "recommendation_lines"
+    performance_snapshots_table: str = "performance_snapshots"
+
+
 class TableauConfig(BaseModel):
     export_csv: bool = True
     export_hyper: bool = False
@@ -151,6 +171,8 @@ class PortfolioConfig(BaseModel):
     portfolio_state: PortfolioStateConfig = Field(default_factory=PortfolioStateConfig)
     contributions: ContributionConfig = Field(default_factory=ContributionConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    live_account: LiveAccountConfig = Field(default_factory=LiveAccountConfig)
+    supabase: SupabaseConfig = Field(default_factory=SupabaseConfig)
     tableau: TableauConfig = Field(default_factory=TableauConfig)
     mlflow: MLflowConfig = Field(default_factory=MLflowConfig)
 
