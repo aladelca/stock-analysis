@@ -9,6 +9,8 @@ import pandas as pd
 
 from stock_analysis.config import OptimizerConfig
 
+WEIGHT_DUST_TOLERANCE = 1e-10
+
 
 class OptimizationError(RuntimeError):
     """Raised when portfolio optimization cannot produce a valid solution."""
@@ -78,13 +80,22 @@ def optimize_long_only(
             raw_weights = np.maximum(np.asarray(weights.value, dtype=float), 0)
             if raw_weights.sum() <= 0:
                 break
-            normalized = raw_weights / raw_weights.sum()
+            normalized = _clean_weight_dust(raw_weights)
             return pd.Series(normalized, index=tickers, name="target_weight")
 
     msg = f"Optimization failed with status={problem.status}"
     if last_error is not None:
         msg = f"{msg}; last solver error: {last_error}"
     raise OptimizationError(msg)
+
+
+def _clean_weight_dust(raw_weights: np.ndarray) -> np.ndarray:
+    normalized = raw_weights / raw_weights.sum()
+    cleaned = normalized.copy()
+    cleaned[cleaned < WEIGHT_DUST_TOLERANCE] = 0.0
+    if cleaned.sum() <= 0:
+        return normalized
+    return cleaned / cleaned.sum()
 
 
 def _align_previous_weights(

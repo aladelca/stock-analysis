@@ -49,9 +49,11 @@ forecast:
   momentum_window: 252
   volatility_penalty: 0.25
   covariance_lookback_days: 252
+  ml_min_active_expected_return_vs_benchmark: 0.001
 
 optimizer:
   max_weight: 0.05
+  benchmark_candidate_max_weight: 1.0
   risk_aversion: 10.0
 ```
 
@@ -127,6 +129,10 @@ and optimization outputs carry both semantics:
 - `calibrated_expected_return` is populated only when score-to-return calibration passes.
 - `expected_return` equals `calibrated_expected_return` only when
   `expected_return_is_calibrated = true`; otherwise it remains a score-scale optimizer input.
+- When `forecast.ml_min_active_expected_return_vs_benchmark > 0`, a non-benchmark asset is
+  eligible for a new optimized position only if its calibrated expected return is at least SPY's
+  calibrated expected return plus that margin. If calibration is unavailable, active assets cannot
+  pass this gate; SPY can still remain the full allocation.
 
 For each eligible asset `i`, the MVP computes:
 

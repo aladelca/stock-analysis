@@ -527,6 +527,9 @@ def _persist_account_tracking_outputs(
             calibration_mae=_optional_float(metadata.get("calibration_mae")),
             calibration_rmse=_optional_float(metadata.get("calibration_rmse")),
             calibration_rank_ic=_optional_float(metadata.get("calibration_rank_ic")),
+            min_active_expected_return_vs_benchmark=_optional_float(
+                metadata.get("min_active_expected_return_vs_benchmark")
+            ),
         )
     )
     if recommendation_run.id is None:
@@ -594,6 +597,11 @@ def _recommendation_line_record(
         expected_return=_optional_float(row.get("expected_return")),
         calibrated_expected_return=_optional_float(row.get("calibrated_expected_return")),
         expected_return_is_calibrated=_optional_bool(row.get("expected_return_is_calibrated")),
+        benchmark_expected_return=_optional_float(row.get("benchmark_expected_return")),
+        benchmark_expected_return_margin=_optional_float(
+            row.get("benchmark_expected_return_margin")
+        ),
+        benchmark_return_gate_passed=_optional_bool(row.get("benchmark_return_gate_passed")),
         volatility=_optional_float(row.get("volatility")),
         forecast_horizon_days=_optional_int(row.get("forecast_horizon_days")),
         forecast_start_date=_optional_date(row.get("forecast_start_date")),
@@ -746,6 +754,9 @@ def _build_run_metadata(
         "calibration_mae": calibration.get("calibration_mae"),
         "calibration_rmse": calibration.get("calibration_rmse"),
         "calibration_rank_ic": calibration.get("calibration_rank_ic"),
+        "min_active_expected_return_vs_benchmark": (
+            config.forecast.ml_min_active_expected_return_vs_benchmark
+        ),
         "commission_rate": config.optimizer.commission_rate,
         "min_rebalance_trade_weight": config.optimizer.min_rebalance_trade_weight,
         "sector_max_weight": config.optimizer.sector_max_weight,

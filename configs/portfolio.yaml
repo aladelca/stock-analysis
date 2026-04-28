@@ -58,10 +58,11 @@ forecast:
   ml_calibration_embargo_days: 15
   ml_calibration_shrinkage: 0.25
   ml_use_calibrated_expected_return: true
+  ml_min_active_expected_return_vs_benchmark: 0.001
 
 optimizer:
   max_weight: 0.24
-  benchmark_candidate_max_weight: 0.8
+  benchmark_candidate_max_weight: 1.0
   risk_aversion: 10.0
   min_trade_weight: 0.005
   min_rebalance_trade_weight: 0.005

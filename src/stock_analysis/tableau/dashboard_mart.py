@@ -32,6 +32,12 @@ def build_dashboard_mart(
         mart["expected_return_is_calibrated"] = False
     if "calibrated_expected_return" not in mart.columns:
         mart["calibrated_expected_return"] = pd.NA
+    if "benchmark_expected_return" not in mart.columns:
+        mart["benchmark_expected_return"] = pd.NA
+    if "benchmark_expected_return_margin" not in mart.columns:
+        mart["benchmark_expected_return_margin"] = pd.NA
+    if "benchmark_return_gate_passed" not in mart.columns:
+        mart["benchmark_return_gate_passed"] = pd.NA
     target_weight = pd.to_numeric(mart["target_weight"], errors="coerce").fillna(0.0)
     executable_target_weight = pd.to_numeric(
         mart.get("executable_target_weight", target_weight),
@@ -113,6 +119,9 @@ def build_dashboard_mart(
         "forecast_score",
         "expected_return_is_calibrated",
         "calibrated_expected_return",
+        "benchmark_expected_return",
+        "benchmark_expected_return_margin",
+        "benchmark_return_gate_passed",
         "forecast_horizon_days",
         "forecast_start_date",
         "forecast_end_date",
@@ -205,6 +214,7 @@ def build_dashboard_mart(
         "run_calibration_mae",
         "run_calibration_rmse",
         "run_calibration_rank_ic",
+        "run_min_active_expected_return_vs_benchmark",
     ]
     for column in column_order:
         if column not in mart.columns:
@@ -252,6 +262,7 @@ def _single_row_metadata(run_metadata: pd.DataFrame) -> dict[str, object]:
             "calibration_mae",
             "calibration_rmse",
             "calibration_rank_ic",
+            "min_active_expected_return_vs_benchmark",
             "live_account_enabled",
             "live_account_slug",
             "live_cashflow_source",

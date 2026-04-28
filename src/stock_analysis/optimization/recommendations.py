@@ -118,6 +118,9 @@ def build_recommendations(
         "expected_return",
         "calibrated_expected_return",
         "expected_return_is_calibrated",
+        "benchmark_expected_return",
+        "benchmark_expected_return_margin",
+        "benchmark_return_gate_passed",
         "volatility",
         "current_weight",
         "target_weight",
@@ -284,6 +287,17 @@ def _attach_forecast_semantics(result: pd.DataFrame) -> pd.DataFrame:
             calibrated.notna(),
             expected.where(enriched["expected_return_is_calibrated"]),
         )
+    if "benchmark_expected_return" not in enriched.columns:
+        enriched["benchmark_expected_return"] = np.nan
+    if "benchmark_expected_return_margin" not in enriched.columns:
+        enriched["benchmark_expected_return_margin"] = 0.0
+    if "benchmark_return_gate_passed" not in enriched.columns:
+        enriched["benchmark_return_gate_passed"] = True
+    enriched["benchmark_return_gate_passed"] = (
+        enriched["benchmark_return_gate_passed"]
+        .where(enriched["benchmark_return_gate_passed"].notna(), True)
+        .astype(bool)
+    )
     return enriched
 
 
@@ -381,6 +395,18 @@ def _reason_codes(result: pd.DataFrame) -> pd.Series:
     eligible = result.get("eligible_for_optimization", pd.Series(False, index=result.index))
     eligible = eligible.fillna(False).astype(bool)
     reason.loc[result["action"].eq("EXCLUDE") & ~eligible] = "ineligible_data_quality"
+
+    benchmark_gate_passed = result.get(
+        "benchmark_return_gate_passed",
+        pd.Series(True, index=result.index),
+    )
+    benchmark_gate_passed = benchmark_gate_passed.where(
+        benchmark_gate_passed.notna(),
+        True,
+    ).astype(bool)
+    reason.loc[result["action"].eq("EXCLUDE") & ~benchmark_gate_passed] = (
+        "failed_benchmark_return_gate"
+    )
 
     outside = result.get("_outside_optimizer_universe", pd.Series(False, index=result.index))
     outside = outside.fillna(False).astype(bool)

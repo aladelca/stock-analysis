@@ -96,6 +96,7 @@ class ForecastConfig(BaseModel):
     ml_calibration_embargo_days: int = Field(default=15, ge=0)
     ml_calibration_shrinkage: float = Field(default=0.25, ge=0, le=1)
     ml_use_calibrated_expected_return: bool = True
+    ml_min_active_expected_return_vs_benchmark: float = Field(default=0.0, ge=0)
 
     @field_validator("label_horizons")
     @classmethod
@@ -108,7 +109,7 @@ class ForecastConfig(BaseModel):
 
 class OptimizerConfig(BaseModel):
     max_weight: float = Field(default=0.05, gt=0, le=1)
-    benchmark_candidate_max_weight: float | None = Field(default=0.8, gt=0, le=1)
+    benchmark_candidate_max_weight: float | None = Field(default=1.0, gt=0, le=1)
     risk_aversion: float = Field(default=10.0, ge=0)
     min_trade_weight: float = Field(default=0.005, ge=0)
     min_rebalance_trade_weight: float = Field(default=0.005, ge=0)

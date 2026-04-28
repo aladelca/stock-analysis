@@ -159,6 +159,7 @@ def _recommendation_lines_history_frame(
                 "calibration_mae",
                 "calibration_rmse",
                 "calibration_rank_ic",
+                "min_active_expected_return_vs_benchmark",
                 "run_status",
             ]
         ],

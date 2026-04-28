@@ -152,7 +152,7 @@ uv run --extra supabase stock-analysis show-latest-portfolio-snapshot \
 
 When `live_account.cashflow_source: actual` is set, `run-one-shot` loads the latest portfolio snapshot on or before the market data date, applies settled cashflows strictly after that snapshot date unless they are marked as included in a later snapshot, and uses that amount as the rebalance contribution. The monthly deposit assumption remains for backtesting and scenario mode.
 
-By default, SPY remains the benchmark and is also added as an optimizer candidate when price history is available. It uses the separate `optimizer.benchmark_candidate_max_weight` cap, while `optimizer.preserve_outside_holdings` applies to positions that are still outside the optimizer universe.
+By default, SPY remains the benchmark and is also added as an optimizer candidate when price history is available. `optimizer.benchmark_candidate_max_weight: 1.0` lets SPY stay at 100% when active names do not clear the calibrated SPY-relative gate. `forecast.ml_min_active_expected_return_vs_benchmark` requires non-benchmark buy candidates to beat SPY's calibrated expected return by the configured margin, while `optimizer.preserve_outside_holdings` applies to positions that are still outside the optimizer universe.
 
 ```bash
 uv run --extra supabase stock-analysis run-one-shot \
@@ -209,6 +209,9 @@ Recommendation lines now include forecast outcome fields:
 
 - `forecast_score`
 - `expected_return_is_calibrated`
+- `benchmark_expected_return`
+- `benchmark_expected_return_margin`
+- `benchmark_return_gate_passed`
 - `calibrated_expected_return`
 - `target_weight`
 - `executable_target_weight`

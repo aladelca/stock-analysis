@@ -5,6 +5,7 @@ import pandas as pd
 
 from stock_analysis.config import ForecastConfig
 from stock_analysis.forecasting.ml_forecast import (
+    _apply_benchmark_expected_return_gate,
     build_ml_optimizer_inputs,
     build_ml_optimizer_inputs_with_artifacts,
 )
@@ -120,3 +121,33 @@ def test_build_ml_optimizer_inputs_uses_phase2_blend_and_liquidity_filter() -> N
     assert calibrated.calibration_diagnostics["calibration_status"].iat[0] == "calibrated"
     assert calibrated.calibration_diagnostics["calibration_observations"].iat[0] >= 20
     assert not calibrated.calibration_predictions.empty
+
+
+def test_benchmark_expected_return_gate_requires_active_return_margin() -> None:
+    optimizer_input = pd.DataFrame(
+        {
+            "ticker": ["SPY", "AAA", "BBB", "CCC"],
+            "expected_return": [0.004, 0.0045, 0.005, 0.006],
+            "expected_return_is_calibrated": [True, True, False, True],
+            "volatility": [0.1, 0.1, 0.1, 0.1],
+            "eligible_for_optimization": [True, True, True, True],
+            "is_benchmark_candidate": [True, False, False, False],
+        }
+    )
+
+    gated = _apply_benchmark_expected_return_gate(
+        optimizer_input,
+        ForecastConfig(
+            engine="ml",
+            ml_min_active_expected_return_vs_benchmark=0.001,
+        ),
+    )
+    by_ticker = gated.set_index("ticker")
+
+    assert bool(by_ticker.loc["SPY", "eligible_for_optimization"])
+    assert not bool(by_ticker.loc["AAA", "eligible_for_optimization"])
+    assert not bool(by_ticker.loc["BBB", "eligible_for_optimization"])
+    assert bool(by_ticker.loc["CCC", "eligible_for_optimization"])
+    assert by_ticker.loc["AAA", "benchmark_expected_return"] == 0.004
+    assert by_ticker.loc["AAA", "benchmark_expected_return_margin"] == 0.001
+    assert not bool(by_ticker.loc["AAA", "benchmark_return_gate_passed"])

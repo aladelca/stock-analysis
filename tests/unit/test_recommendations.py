@@ -93,6 +93,39 @@ def test_recommendation_hold_and_exclude_actions() -> None:
     assert by_ticker.loc["CCC", "action"] == "EXCLUDE"
 
 
+def test_recommendation_reason_marks_failed_benchmark_return_gate() -> None:
+    optimizer_input = pd.DataFrame(
+        {
+            "ticker": ["SPY", "AAA"],
+            "security": ["SPDR S&P 500 ETF", "AAA Corp"],
+            "gics_sector": ["Benchmark ETF", "Technology"],
+            "expected_return": [0.004, 0.0045],
+            "calibrated_expected_return": [0.004, 0.0045],
+            "expected_return_is_calibrated": [True, True],
+            "benchmark_expected_return": [0.004, 0.004],
+            "benchmark_expected_return_margin": [0.001, 0.001],
+            "benchmark_return_gate_passed": [True, False],
+            "volatility": [0.1, 0.1],
+            "eligible_for_optimization": [True, False],
+        }
+    )
+    weights = pd.Series([1.0], index=["SPY"])
+
+    recommendations = build_recommendations(
+        optimizer_input,
+        weights,
+        OptimizerConfig(max_weight=1.0),
+        "2026-04-24",
+        "run-1",
+        current_weights=pd.Series({"SPY": 1.0}),
+    )
+    by_ticker = recommendations.set_index("ticker")
+
+    assert by_ticker.loc["AAA", "action"] == "EXCLUDE"
+    assert by_ticker.loc["AAA", "reason_code"] == "failed_benchmark_return_gate"
+    assert not bool(by_ticker.loc["AAA", "benchmark_return_gate_passed"])
+
+
 def test_recommendations_include_contribution_dollar_fields() -> None:
     optimizer_input = pd.DataFrame(
         {

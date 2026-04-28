@@ -278,6 +278,8 @@ Refresh the workbook in Tableau Cloud. If `run_id` changes in the footer, the lo
   current holdings file.
 - `forecast_score` is a ranking signal. Use `calibrated_expected_return` as expected percentage
   return only when `expected_return_is_calibrated = true`.
+- `benchmark_return_gate_passed` explains active-name exclusions caused by the configured
+  SPY-relative calibrated expected-return margin.
 - `target_weight` is the optimizer target. Use `display_target_weight` or
   `executable_target_weight` for dashboard holdings, because no-trade-band rows can have a
   nonzero optimizer target and no executable buy.

@@ -36,10 +36,11 @@ forecast:
   ml_horizon_days: 5
   ml_max_assets: 100
   ml_score_scale: 1.0
+  ml_min_active_expected_return_vs_benchmark: 0.001
 
 optimizer:
   max_weight: 0.24
-  benchmark_candidate_max_weight: 0.8
+  benchmark_candidate_max_weight: 1.0
   lambda_turnover: 5.0
   preserve_outside_holdings: true
 

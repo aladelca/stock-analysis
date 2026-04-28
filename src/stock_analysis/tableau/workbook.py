@@ -77,6 +77,27 @@ FIELDS: dict[str, TableauField] = {
         "quantitative",
         "Calibrated Expected Return",
     ),
+    "benchmark_expected_return": TableauField(
+        "benchmark_expected_return",
+        "real",
+        "measure",
+        "quantitative",
+        "Benchmark Expected Return",
+    ),
+    "benchmark_expected_return_margin": TableauField(
+        "benchmark_expected_return_margin",
+        "real",
+        "measure",
+        "quantitative",
+        "Benchmark Expected Return Margin",
+    ),
+    "benchmark_return_gate_passed": TableauField(
+        "benchmark_return_gate_passed",
+        "boolean",
+        "dimension",
+        "nominal",
+        "Benchmark Return Gate Passed",
+    ),
     "forecast_horizon_days": TableauField(
         "forecast_horizon_days", "integer", "dimension", "nominal", "Forecast Horizon Days"
     ),

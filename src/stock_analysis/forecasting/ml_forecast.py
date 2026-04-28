@@ -128,6 +128,7 @@ def build_ml_optimizer_inputs_with_artifacts(
         & np.isfinite(optimizer_input["volatility"].astype(float))
         & (optimizer_input["volatility"].astype(float) > 0)
     )
+    optimizer_input = _apply_benchmark_expected_return_gate(optimizer_input, config)
     optimizer_input["forecast_engine"] = "ml"
     optimizer_input["forecast_model_version"] = config.ml_model_version
     optimizer_input["as_of_date"] = latest_date.date().isoformat()
@@ -141,6 +142,9 @@ def build_ml_optimizer_inputs_with_artifacts(
         "forecast_score",
         "calibrated_expected_return",
         "volatility",
+        "benchmark_expected_return",
+        "benchmark_expected_return_margin",
+        "benchmark_return_gate_passed",
         "eligible_for_optimization",
         "forecast_engine",
         "forecast_model_version",
@@ -166,6 +170,47 @@ def build_ml_optimizer_inputs_with_artifacts(
         calibration_predictions=calibration.predictions,
         calibration_diagnostics=calibration.diagnostics,
     )
+
+
+def _apply_benchmark_expected_return_gate(
+    optimizer_input: pd.DataFrame,
+    config: ForecastConfig,
+) -> pd.DataFrame:
+    result = optimizer_input.copy()
+    margin = float(config.ml_min_active_expected_return_vs_benchmark)
+    result["benchmark_expected_return"] = np.nan
+    result["benchmark_expected_return_margin"] = margin
+    result["benchmark_return_gate_passed"] = True
+
+    if margin <= 0 or "is_benchmark_candidate" not in result.columns:
+        return result
+
+    benchmark_mask = result["is_benchmark_candidate"].fillna(False).astype(bool)
+    if not benchmark_mask.any():
+        return result
+
+    expected_return = pd.to_numeric(result["expected_return"], errors="coerce")
+    if "expected_return_is_calibrated" in result.columns:
+        calibrated = result["expected_return_is_calibrated"].fillna(False).astype(bool)
+    else:
+        calibrated = pd.Series(False, index=result.index)
+
+    benchmark_values = expected_return.where(benchmark_mask & calibrated).dropna()
+    if benchmark_values.empty:
+        gate_passed = benchmark_mask
+    else:
+        benchmark_expected_return = float(benchmark_values.max())
+        result["benchmark_expected_return"] = benchmark_expected_return
+        gate_passed = benchmark_mask | (
+            calibrated & expected_return.ge(benchmark_expected_return + margin)
+        )
+
+    result["benchmark_return_gate_passed"] = gate_passed.fillna(False).astype(bool)
+    result["eligible_for_optimization"] = (
+        result["eligible_for_optimization"].fillna(False).astype(bool)
+        & result["benchmark_return_gate_passed"]
+    )
+    return result
 
 
 def _model_factory(

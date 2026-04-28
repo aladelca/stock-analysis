@@ -84,6 +84,7 @@ class RecommendationRunRecord:
     calibration_mae: float | None = None
     calibration_rmse: float | None = None
     calibration_rank_ic: float | None = None
+    min_active_expected_return_vs_benchmark: float | None = None
     status: str = "completed"
     id: str | None = None
 
@@ -111,6 +112,9 @@ class RecommendationLineRecord:
     expected_return: float | None = None
     calibrated_expected_return: float | None = None
     expected_return_is_calibrated: bool | None = None
+    benchmark_expected_return: float | None = None
+    benchmark_expected_return_margin: float | None = None
+    benchmark_return_gate_passed: bool | None = None
     volatility: float | None = None
     forecast_horizon_days: int | None = None
     forecast_start_date: date | None = None

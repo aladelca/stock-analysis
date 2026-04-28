@@ -181,6 +181,7 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
             calibration_mae=0.015,
             calibration_rmse=0.02,
             calibration_rank_ic=0.12,
+            min_active_expected_return_vs_benchmark=0.001,
         )
     )
     lines = repo.insert_recommendation_lines(
@@ -194,6 +195,9 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
                 action="BUY",
                 forecast_score=0.2,
                 expected_return=0.2,
+                benchmark_expected_return=0.1,
+                benchmark_expected_return_margin=0.001,
+                benchmark_return_gate_passed=True,
                 forecast_horizon_days=5,
                 forecast_start_date=date(2026, 4, 24),
                 outcome_status="pending",
@@ -222,11 +226,18 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
     assert run.calibration_trained_through_date == date(2026, 4, 23)
     assert run.calibration_observations == 250
     assert run.calibration_mae == pytest.approx(0.015)
+    assert run.min_active_expected_return_vs_benchmark == pytest.approx(0.001)
     assert client.tables["recommendation_runs"][0]["calibration_method"] == "isotonic"
+    assert (
+        client.tables["recommendation_runs"][0]["min_active_expected_return_vs_benchmark"] == 0.001
+    )
     assert lines[0].id == "recommendation_lines-1"
     assert lines[0].executable_target_weight == pytest.approx(0.25)
     assert lines[0].executable_target_market_value == pytest.approx(250.0)
     assert lines[0].forecast_score == pytest.approx(0.2)
+    assert lines[0].benchmark_expected_return == pytest.approx(0.1)
+    assert lines[0].benchmark_expected_return_margin == pytest.approx(0.001)
+    assert lines[0].benchmark_return_gate_passed is True
     assert lines[0].forecast_horizon_days == 5
     assert lines[0].forecast_start_date == date(2026, 4, 24)
     assert repo.list_recommendation_runs("account-1") == [run]

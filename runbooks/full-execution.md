@@ -85,10 +85,11 @@ forecast:
   ml_horizon_days: 5
   ml_max_assets: 100
   ml_score_scale: 1.0
+  ml_min_active_expected_return_vs_benchmark: 0.001
 
 optimizer:
   max_weight: 0.24
-  benchmark_candidate_max_weight: 0.8
+  benchmark_candidate_max_weight: 1.0
   risk_aversion: 10.0
   commission_rate: 0.02
   min_rebalance_trade_weight: 0.005
@@ -129,10 +130,12 @@ Notes:
 - `forecast.ml_model_version: lightgbm_return_zscore` uses the best researched PIT
   production-economics candidate from `docs/experiments/autoresearch-summary.md`.
 - `forecast.ml_score_scale: 1.0` keeps the candidate's z-scored forecast scale unchanged.
+- `forecast.ml_min_active_expected_return_vs_benchmark: 0.001` requires a non-benchmark buy
+  candidate to have a calibrated 5-trading-day expected return at least 10 bps above SPY.
 - `prices.include_benchmark_tickers_in_universe: true` makes SPY both the benchmark and an
   eligible optimizer candidate when SPY price history is available.
-- `optimizer.benchmark_candidate_max_weight: 0.8` gives benchmark ETFs a separate cap from the
-  single-stock `optimizer.max_weight`.
+- `optimizer.benchmark_candidate_max_weight: 1.0` lets SPY remain the full allocation when no
+  active name clears the calibrated SPY-relative gate.
 - `portfolio_state.current_holdings_path: null` means first-allocation mode.
 - `contributions.monthly_deposit_amount: 0.0` disables scenario-mode deposit modeling for the
   one-shot run. Backtests and autoresearch still use the monthly deposit assumption when supplied.
@@ -263,6 +266,7 @@ data/runs/$RUN_ID/gold/csv/portfolio_recommendations.csv
 Live Supabase-backed runs also produce account-tracking outputs. `recommendation_lines`
 and `portfolio_dashboard_mart` include forecast horizon outcome columns such as
 `forecast_score`, `expected_return_is_calibrated`, `calibrated_expected_return`,
+`benchmark_expected_return`, `benchmark_expected_return_margin`, `benchmark_return_gate_passed`,
 `target_weight`, `executable_target_weight`, `executable_target_market_value`,
 `forecast_horizon_days`, `forecast_start_date`, `forecast_end_date`, `realized_return`,
 `realized_spy_return`, `realized_active_return`, `forecast_error`, `forecast_hit`, and
@@ -416,10 +420,11 @@ forecast:
   ml_calibration_splits: 5
   ml_calibration_embargo_days: 15
   ml_calibration_shrinkage: 0.25
+  ml_min_active_expected_return_vs_benchmark: 0.001
 
 optimizer:
   max_weight: 0.24
-  benchmark_candidate_max_weight: 0.8
+  benchmark_candidate_max_weight: 1.0
   lambda_turnover: 5.0
   preserve_outside_holdings: true
 
@@ -524,10 +529,11 @@ forecast:
   ml_horizon_days: 5
   ml_max_assets: 100
   ml_score_scale: 1.0
+  ml_min_active_expected_return_vs_benchmark: 0.001
 
 optimizer:
   max_weight: 0.24
-  benchmark_candidate_max_weight: 0.8
+  benchmark_candidate_max_weight: 1.0
   lambda_turnover: 5.0
   preserve_outside_holdings: true
 

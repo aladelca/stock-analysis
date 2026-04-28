@@ -425,6 +425,9 @@ def _recommendation_run_from_row(row: Mapping[str, Any]) -> RecommendationRunRec
         calibration_mae=_optional_float(row.get("calibration_mae")),
         calibration_rmse=_optional_float(row.get("calibration_rmse")),
         calibration_rank_ic=_optional_float(row.get("calibration_rank_ic")),
+        min_active_expected_return_vs_benchmark=_optional_float(
+            row.get("min_active_expected_return_vs_benchmark")
+        ),
         status=str(row.get("status") or "completed"),
     )
 
@@ -453,6 +456,11 @@ def _recommendation_line_from_row(row: Mapping[str, Any]) -> RecommendationLineR
         expected_return=_optional_float(row.get("expected_return")),
         calibrated_expected_return=_optional_float(row.get("calibrated_expected_return")),
         expected_return_is_calibrated=_optional_bool(row.get("expected_return_is_calibrated")),
+        benchmark_expected_return=_optional_float(row.get("benchmark_expected_return")),
+        benchmark_expected_return_margin=_optional_float(
+            row.get("benchmark_expected_return_margin")
+        ),
+        benchmark_return_gate_passed=_optional_bool(row.get("benchmark_return_gate_passed")),
         volatility=_optional_float(row.get("volatility")),
         forecast_horizon_days=_optional_int(row.get("forecast_horizon_days")),
         forecast_start_date=_optional_date(row.get("forecast_start_date")),

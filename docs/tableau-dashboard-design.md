@@ -83,6 +83,8 @@ Use a single dashboard, fixed at `1280 x 850` for the generated base workbook.
 - Use one screen. Avoid tabs until there is historical data.
 - Treat `forecast_score` as a ranking signal. Treat `calibrated_expected_return` as an expected
   5-trading-day return only when `expected_return_is_calibrated = true`.
+- Use `benchmark_return_gate_passed` to explain excluded active names when they do not beat SPY's
+  calibrated expected return plus the configured margin.
 - Make concentration visible. The treemap should make dominant sectors obvious.
 - Keep selected and excluded assets in the same scatter so the recommendation context is visible.
 - Use the footer to make run freshness auditable.
