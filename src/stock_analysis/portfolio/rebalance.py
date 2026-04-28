@@ -60,8 +60,15 @@ def plan_rebalance_trades(
     min_trade_weight: float,
     no_trade_band: float = 0.0,
 ) -> pd.DataFrame:
-    tickers = pd.Index(target_weights.index.astype(str), name="ticker")
-    current_weights = context.current_weights.reindex(tickers).fillna(0.0)
+    target_weights = target_weights.copy()
+    target_weights.index = target_weights.index.astype(str)
+    current_weights_source = context.current_weights.copy()
+    current_weights_source.index = current_weights_source.index.astype(str)
+    tickers = pd.Index(
+        list(dict.fromkeys([*target_weights.index, *current_weights_source.index])),
+        name="ticker",
+    )
+    current_weights = current_weights_source.reindex(tickers).fillna(0.0)
     target_weights = target_weights.reindex(tickers).fillna(0.0).astype(float)
     trade_weights = target_weights - current_weights
     threshold = max(float(min_trade_weight), float(no_trade_band))

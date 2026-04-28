@@ -265,31 +265,6 @@ def _attach_rebalance_plan(
         if column in plan.columns:
             enriched[column] = enriched["ticker"].map(plan[column])
 
-    portfolio_value_after = rebalance_context.portfolio_value_after_contribution
-    outside = enriched["_outside_optimizer_universe"].fillna(False).astype(bool)
-    if outside.any():
-        enriched.loc[outside, "portfolio_value_before_contribution"] = (
-            rebalance_context.portfolio_value_before_contribution
-        )
-        enriched.loc[outside, "contribution_amount"] = rebalance_context.contribution_amount
-        enriched.loc[outside, "portfolio_value_after_contribution"] = portfolio_value_after
-        enriched.loc[outside, "current_market_value"] = (
-            enriched.loc[outside, "current_weight"] * portfolio_value_after
-        )
-        enriched.loc[outside, "target_market_value"] = 0.0
-        planned_outside = enriched.loc[outside, "action"].isin(["BUY", "SELL"])
-        enriched.loc[outside, "trade_notional"] = np.where(
-            planned_outside,
-            enriched.loc[outside, "trade_weight"] * portfolio_value_after,
-            0.0,
-        )
-        enriched.loc[outside, "commission_amount"] = (
-            enriched.loc[outside, "trade_notional"].abs() * config.commission_rate
-        )
-        enriched.loc[outside, "deposit_used_amount"] = 0.0
-        enriched.loc[outside, "cash_after_trade_amount"] = pd.NA
-        enriched.loc[outside, "no_trade_band_applied"] = False
-
     return _attach_empty_rebalance_plan(enriched)
 
 
