@@ -20,6 +20,7 @@ class AccountRecord:
     slug: str
     display_name: str
     id: str | None = None
+    owner_id: str | None = None
     base_currency: str = "USD"
     benchmark_ticker: str = "SPY"
 

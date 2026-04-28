@@ -52,6 +52,7 @@ def export_existing_run_for_tableau(config: PortfolioConfig, run_id: str) -> dic
 
     if config.tableau.export_hyper:
         performance_snapshots = _read_optional_gold_table(paths, "performance_snapshots")
+        optional_gold_tables = _read_optional_gold_tables(paths)
         dashboard_mart = build_dashboard_mart(
             _read_gold_table(paths, "portfolio_recommendations"),
             _read_gold_table(paths, "portfolio_risk_metrics"),
@@ -59,8 +60,12 @@ def export_existing_run_for_tableau(config: PortfolioConfig, run_id: str) -> dic
             _read_gold_table(paths, "run_metadata"),
             performance_snapshots=performance_snapshots,
         )
+        hyper_tables = {
+            "portfolio_dashboard_mart": dashboard_mart,
+            **optional_gold_tables,
+        }
         hyper_path = paths.gold_path("tableau_dashboard_mart", "hyper")
-        exported = export_hyper_if_available(dashboard_mart, hyper_path)
+        exported = export_hyper_if_available(hyper_tables, hyper_path)
         if exported is not None:
             outputs["gold.tableau_dashboard_mart.hyper"] = exported
 
@@ -91,3 +96,14 @@ def _read_optional_gold_table(paths: ProjectPaths, name: str) -> pd.DataFrame | 
     if not parquet_path.exists():
         return None
     return pd.read_parquet(parquet_path)
+
+
+def _read_optional_gold_tables(paths: ProjectPaths) -> dict[str, pd.DataFrame]:
+    tables: dict[str, pd.DataFrame] = {}
+    for layer, name in TABLEAU_OPTIONAL_CSV_TABLES:
+        if layer != "gold":
+            continue
+        table = _read_optional_gold_table(paths, name)
+        if table is not None:
+            tables[name] = table
+    return tables

@@ -397,7 +397,7 @@ Expected Hyper file:
 data/runs/$RUN_ID/gold/tableau_dashboard_mart.hyper
 ```
 
-This Hyper extract contains the single `portfolio_dashboard_mart` table. With live account tracking enabled, it includes latest account performance fields, but full cashflow and performance history remains in the optional gold CSV/Parquet tables for the run.
+This Hyper extract contains `portfolio_dashboard_mart`. With live account tracking enabled, it also includes the account tracking tables for cashflows, snapshots, recommendation history, and performance history.
 
 ## 12. Tableau Prep Transformation
 

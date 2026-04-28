@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
 
 
-def export_hyper_if_available(table: pd.DataFrame, path: Path) -> Path | None:
+def export_hyper_if_available(
+    table: pd.DataFrame | Mapping[str, pd.DataFrame],
+    path: Path,
+    *,
+    table_name: str = "portfolio_dashboard_mart",
+) -> Path | None:
     try:
         from tableauhyperapi import (
             Connection,
@@ -24,26 +30,28 @@ def export_hyper_if_available(table: pd.DataFrame, path: Path) -> Path | None:
     if path.exists():
         path.unlink()
 
+    tables = {table_name: table} if isinstance(table, pd.DataFrame) else dict(table)
     with (
         HyperProcess(telemetry=Telemetry.DO_NOT_SEND_USAGE_DATA_TO_TABLEAU) as hyper,
         Connection(hyper.endpoint, path, CreateMode.CREATE_AND_REPLACE) as connection,
     ):
         connection.catalog.create_schema("Extract")
-        definition = TableDefinition(
-            table_name=TableName("Extract", "portfolio_dashboard_mart"),
-            columns=[
-                TableDefinition.Column(column, _sql_type_for_series(table[column]))
-                for column in table.columns
-            ],
-        )
-        connection.catalog.create_table(definition)
-        rows = [
-            tuple(None if pd.isna(value) else value for value in row)
-            for row in table.itertuples(index=False, name=None)
-        ]
-        with Inserter(connection, definition) as inserter:
-            inserter.add_rows(rows)
-            inserter.execute()
+        for current_table_name, frame in tables.items():
+            definition = TableDefinition(
+                table_name=TableName("Extract", current_table_name),
+                columns=[
+                    TableDefinition.Column(column, _sql_type_for_series(frame[column]))
+                    for column in frame.columns
+                ],
+            )
+            connection.catalog.create_table(definition)
+            rows = [
+                tuple(None if pd.isna(value) else value for value in row)
+                for row in frame.itertuples(index=False, name=None)
+            ]
+            with Inserter(connection, definition) as inserter:
+                inserter.add_rows(rows)
+                inserter.execute()
     return path
 
 

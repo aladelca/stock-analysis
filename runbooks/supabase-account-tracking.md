@@ -10,7 +10,7 @@ Install the optional Supabase client extra:
 uv sync --extra supabase
 ```
 
-Apply the SQL migration in `supabase/migrations/202604260001_account_tracking.sql` through your Supabase project, or with the Supabase CLI if you manage migrations there.
+Apply the SQL migrations in `supabase/migrations/` through your Supabase project, or with the Supabase CLI if you manage migrations there.
 
 Set credentials in `.env` or your shell:
 
@@ -21,7 +21,7 @@ SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 
 Use the service role key only from local/server jobs. Do not expose it in Tableau, browser code, or committed config files.
 
-The migration enables row level security, but this implementation is currently designed for service-role jobs. Add explicit RLS policies before exposing these tables directly to a browser, mobile app, or Tableau user credentials.
+Row level security is owner-scoped through `accounts.owner_id`. Service-role jobs bypass RLS; browser, mobile, or Tableau user-credential access requires account rows whose `owner_id` matches `auth.uid()`.
 
 Enable the database-backed account flow in a local config:
 
@@ -44,8 +44,11 @@ uv run --extra supabase stock-analysis upsert-account \
   --config configs/portfolio.local.yaml \
   --account-slug main \
   --display-name "Main Brokerage" \
+  --owner-id "<supabase-auth-user-uuid>" \
   --benchmark-ticker SPY
 ```
+
+Omit `--owner-id` for service-role-only local automation. Add it before exposing account data through authenticated Supabase clients.
 
 ## Register A Deposit
 
@@ -151,12 +154,14 @@ The live run writes the standard recommendation outputs plus these Tableau-ready
 
 CSV mirrors are written under `data/runs/<run_id>/gold/csv/`. `export-tableau` also mirrors these tables when they exist in an existing run.
 
+For live account runs, `recommendation_runs`, `recommendation_lines`, and `performance_snapshots` are also persisted back to Supabase after the local gold artifacts are written.
+
 `performance_snapshots` uses actual imported portfolio snapshots as valuation points. If you want return tracking to be meaningful, import a fresh snapshot after market close before running the recommendation flow. Cashflows after the latest snapshot are still used for recommendations, but they are not a substitute for an updated valuation snapshot.
 
-## Current Boundaries
+## Operational Notes
 
-Supabase is currently the input store for accounts, cashflows, portfolio snapshots, and holdings. Recommendation runs, recommendation lines, and performance snapshots are built as local run artifacts under `data/runs/<run_id>/gold/`; they are not written back to Supabase yet.
+Supabase is the source for accounts, cashflows, portfolio snapshots, and holdings, and it stores live recommendation and performance history after each successful live run.
 
-The generated Hyper extract contains the single `portfolio_dashboard_mart` table with the latest account performance fields joined into each recommendation row. Full account tracking history is available as Parquet and CSV tables, but it is not packaged into a multi-table Hyper datasource yet.
+The generated Hyper extract contains `portfolio_dashboard_mart` plus account tracking tables when they exist for the run. CSV and Parquet mirrors remain available under `data/runs/<run_id>/gold/`.
 
-Snapshot import inserts the portfolio snapshot and holding rows in separate Supabase calls. If holding insertion fails after the snapshot insert succeeds, fix or delete the partial snapshot before using it for live recommendations.
+Snapshot import inserts the portfolio snapshot and holding rows in separate Supabase calls, with compensating cleanup if holding insertion fails. If both holding insertion and cleanup fail, inspect the snapshot before using it for live recommendations.

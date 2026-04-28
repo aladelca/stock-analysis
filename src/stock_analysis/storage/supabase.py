@@ -124,7 +124,26 @@ class SupabaseAccountTrackingRepository:
             rows = [
                 _record_payload(replace(holding, snapshot_id=inserted.id)) for holding in holdings
             ]
-            _execute(self._table(self._config.holding_snapshots_table).insert(rows))
+            try:
+                _execute(self._table(self._config.holding_snapshots_table).insert(rows))
+            except SupabaseRepositoryError as exc:
+                try:
+                    _execute(
+                        self._table(self._config.portfolio_snapshots_table)
+                        .delete()
+                        .eq("id", inserted.id)
+                    )
+                except SupabaseRepositoryError as cleanup_exc:
+                    msg = (
+                        "Failed to insert holding snapshots after inserting portfolio snapshot, "
+                        "and cleanup of the partial snapshot also failed."
+                    )
+                    raise SupabaseRepositoryError(msg) from cleanup_exc
+                msg = (
+                    "Failed to insert holding snapshots after inserting portfolio snapshot; "
+                    "deleted the partial portfolio snapshot."
+                )
+                raise SupabaseRepositoryError(msg) from exc
         return inserted
 
     def latest_portfolio_snapshot(
@@ -175,7 +194,10 @@ class SupabaseAccountTrackingRepository:
 
     def insert_recommendation_run(self, run: RecommendationRunRecord) -> RecommendationRunRecord:
         response = _execute(
-            self._table(self._config.recommendation_runs_table).insert(_record_payload(run))
+            self._table(self._config.recommendation_runs_table).upsert(
+                _record_payload(run),
+                on_conflict="run_id",
+            )
         )
         return _recommendation_run_from_row(
             _single_response_row(response, self._config.recommendation_runs_table)
@@ -188,8 +210,9 @@ class SupabaseAccountTrackingRepository:
         if not lines:
             return []
         response = _execute(
-            self._table(self._config.recommendation_lines_table).insert(
-                [_record_payload(line) for line in lines]
+            self._table(self._config.recommendation_lines_table).upsert(
+                [_record_payload(line) for line in lines],
+                on_conflict="recommendation_run_id,ticker",
             )
         )
         return [_recommendation_line_from_row(row) for row in response.data or []]
@@ -245,6 +268,7 @@ def _record_payload(record: Any) -> dict[str, object]:
 def _account_from_row(row: Mapping[str, Any]) -> AccountRecord:
     return AccountRecord(
         id=_optional_str(row.get("id")),
+        owner_id=_optional_str(row.get("owner_id")),
         slug=str(row["slug"]),
         display_name=str(row["display_name"]),
         base_currency=str(row.get("base_currency") or "USD"),

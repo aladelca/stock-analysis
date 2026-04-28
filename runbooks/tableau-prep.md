@@ -27,7 +27,7 @@ recommendation_lines.csv
 performance_snapshots.csv
 ```
 
-Use these files for deposit history, snapshot history, and return tracking. The Python-generated Hyper extract only packages the single `portfolio_dashboard_mart` table today.
+Use these files for deposit history, snapshot history, and return tracking. The Python-generated Hyper extract also includes these tables when they exist for the run.
 
 5. Output the mart to:
 

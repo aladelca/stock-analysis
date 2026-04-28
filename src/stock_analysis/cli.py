@@ -187,6 +187,7 @@ def upsert_account_command(
     config: Path = CONFIG_OPTION,
     account_slug: str | None = typer.Option(None, "--account-slug"),
     display_name: str | None = typer.Option(None, "--display-name"),
+    owner_id: str | None = typer.Option(None, "--owner-id"),
     base_currency: str = typer.Option("USD", "--base-currency"),
     benchmark_ticker: str = typer.Option("SPY", "--benchmark-ticker"),
 ) -> None:
@@ -196,6 +197,7 @@ def upsert_account_command(
         AccountRecord(
             slug=slug,
             display_name=display_name or slug,
+            owner_id=owner_id,
             base_currency=base_currency.upper(),
             benchmark_ticker=benchmark_ticker.upper(),
         )

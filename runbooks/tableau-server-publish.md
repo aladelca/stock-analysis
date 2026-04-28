@@ -66,18 +66,16 @@ Publish the Python-generated Hyper file for the ML run:
 uv run stock-analysis publish-tableau "data/runs/$RUN_ID/gold/tableau_dashboard_mart.hyper" --config configs/portfolio.local.yaml
 ```
 
-The generated Hyper file currently contains one table: `portfolio_dashboard_mart`. When live account tracking is enabled, that table includes the latest account performance fields, but it does not include separate cashflow, snapshot, holding, recommendation-run, or performance-history tables.
+The generated Hyper file always contains `portfolio_dashboard_mart`. When live account tracking is enabled for the run, it also contains the account tracking tables:
 
-For full account tracking history in Tableau today, connect Tableau directly to the CSV mirrors under `data/runs/$RUN_ID/gold/csv/`:
+- `cashflows`
+- `portfolio_snapshots`
+- `holding_snapshots`
+- `recommendation_runs`
+- `recommendation_lines`
+- `performance_snapshots`
 
-```text
-cashflows.csv
-portfolio_snapshots.csv
-holding_snapshots.csv
-recommendation_runs.csv
-recommendation_lines.csv
-performance_snapshots.csv
-```
+The CSV mirrors under `data/runs/$RUN_ID/gold/csv/` are still written for Tableau Prep, audit, and fallback connections.
 
 If a Tableau Prep flow is used and writes to `tableau_prep_outputs/`, publish that
 Prep-generated artifact only after rerunning the flow against the same ML run outputs:

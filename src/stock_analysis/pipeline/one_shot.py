@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
+from typing import Any, cast
 
 import pandas as pd
 
@@ -38,7 +40,12 @@ from stock_analysis.paths import ProjectPaths
 from stock_analysis.portfolio.holdings import PortfolioState, load_portfolio_state
 from stock_analysis.portfolio.live_state import LivePortfolioState, build_live_portfolio_state
 from stock_analysis.portfolio.rebalance import build_rebalance_context
-from stock_analysis.storage.contracts import AccountTrackingRepository
+from stock_analysis.storage.contracts import (
+    AccountTrackingRepository,
+    PerformanceSnapshotRecord,
+    RecommendationLineRecord,
+    RecommendationRunRecord,
+)
 from stock_analysis.storage.supabase import create_account_tracking_repository
 from stock_analysis.tableau.account_tracking_marts import build_account_tracking_marts
 from stock_analysis.tableau.dashboard_mart import build_dashboard_mart
@@ -167,7 +174,7 @@ def run_one_shot(
     write_csv(optimizer_input, paths.csv_mirror_path("gold", "optimizer_input"))
     covariance.to_parquet(paths.gold_path("covariance_matrix"))
 
-    portfolio_state, contribution_amount, live_state = _load_rebalance_state(
+    portfolio_state, contribution_amount, live_state, live_repository = _load_rebalance_state(
         config,
         data_as_of_date=data_as_of_date,
         account_repository=account_repository,
@@ -230,6 +237,15 @@ def run_one_shot(
         )
         for name, table in account_tracking_tables.items():
             _write_gold_with_csv(paths, name, table)
+        if live_repository is not None:
+            _persist_account_tracking_outputs(
+                live_repository,
+                config=config,
+                live_state=live_state,
+                recommendations=recommendations,
+                run_metadata=run_metadata,
+                performance_snapshots=account_tracking_tables["performance_snapshots"],
+            )
 
     artifact_paths = [
         paths.gold_path("portfolio_recommendations"),
@@ -260,8 +276,12 @@ def run_one_shot(
             run_metadata,
             performance_snapshots=account_tracking_tables.get("performance_snapshots"),
         )
+        hyper_tables = {
+            "portfolio_dashboard_mart": dashboard_mart,
+            **account_tracking_tables,
+        }
         exported = export_hyper_if_available(
-            dashboard_mart,
+            hyper_tables,
             hyper_path,
         )
         if exported is None:
@@ -319,9 +339,14 @@ def _load_rebalance_state(
     *,
     data_as_of_date: date,
     account_repository: AccountTrackingRepository | None,
-) -> tuple[PortfolioState, float, LivePortfolioState | None]:
+) -> tuple[PortfolioState, float, LivePortfolioState | None, AccountTrackingRepository | None]:
     if config.live_account.cashflow_source != "actual":
-        return _load_portfolio_state(config), config.contributions.monthly_deposit_amount, None
+        return (
+            _load_portfolio_state(config),
+            config.contributions.monthly_deposit_amount,
+            None,
+            None,
+        )
     if not config.live_account.enabled:
         msg = "Set live_account.enabled=true when live_account.cashflow_source is actual."
         raise ValueError(msg)
@@ -348,7 +373,146 @@ def _load_rebalance_state(
         live_state.snapshot.snapshot_date.isoformat(),
         live_state.contribution_amount,
     )
-    return live_state.state, live_state.contribution_amount, live_state
+    return live_state.state, live_state.contribution_amount, live_state, repository
+
+
+def _persist_account_tracking_outputs(
+    repository: AccountTrackingRepository,
+    *,
+    config: PortfolioConfig,
+    live_state: LivePortfolioState,
+    recommendations: pd.DataFrame,
+    run_metadata: pd.DataFrame,
+    performance_snapshots: pd.DataFrame,
+) -> None:
+    if live_state.account.id is None:
+        msg = f"Account row for {live_state.account.slug} does not include an id."
+        raise ValueError(msg)
+    if run_metadata.empty:
+        msg = "Cannot persist account tracking outputs without run metadata."
+        raise ValueError(msg)
+    metadata = run_metadata.iloc[0].to_dict()
+    recommendation_run = repository.insert_recommendation_run(
+        RecommendationRunRecord(
+            account_id=live_state.account.id,
+            run_id=_required_str(metadata.get("run_id"), "run_id"),
+            as_of_date=_date_field(metadata.get("requested_as_of_date"), "requested_as_of_date"),
+            data_as_of_date=_date_field(metadata.get("data_as_of_date"), "data_as_of_date"),
+            model_version=_required_str(metadata.get("model_version"), "model_version"),
+            ml_score_scale=float(config.forecast.ml_score_scale),
+            config_hash=_required_str(metadata.get("config_hash"), "config_hash"),
+        )
+    )
+    if recommendation_run.id is None:
+        msg = "Persisted recommendation run did not return an id."
+        raise ValueError(msg)
+    repository.insert_recommendation_lines(
+        [
+            _recommendation_line_record(_string_keyed_row(row), recommendation_run.id)
+            for row in recommendations.to_dict("records")
+        ]
+    )
+    for row in performance_snapshots.to_dict("records"):
+        repository.insert_performance_snapshot(
+            PerformanceSnapshotRecord(
+                account_id=live_state.account.id,
+                as_of_date=_date_field(row.get("as_of_date"), "as_of_date"),
+                account_total_value=_required_float(
+                    row.get("account_total_value"), "account_total_value"
+                ),
+                total_deposits=_required_float(row.get("total_deposits"), "total_deposits"),
+                net_external_cashflow=_required_float(
+                    row.get("net_external_cashflow"), "net_external_cashflow"
+                ),
+                account_time_weighted_return=_optional_float(
+                    row.get("account_time_weighted_return")
+                ),
+                account_money_weighted_return=_optional_float(
+                    row.get("account_money_weighted_return")
+                ),
+                spy_same_cashflow_value=_optional_float(row.get("spy_same_cashflow_value")),
+                spy_time_weighted_return=_optional_float(row.get("spy_time_weighted_return")),
+                spy_money_weighted_return=_optional_float(row.get("spy_money_weighted_return")),
+                active_value=_optional_float(row.get("active_value")),
+                active_return=_optional_float(row.get("active_return")),
+            )
+        )
+
+
+def _recommendation_line_record(
+    row: dict[str, object],
+    recommendation_run_id: str,
+) -> RecommendationLineRecord:
+    return RecommendationLineRecord(
+        recommendation_run_id=recommendation_run_id,
+        ticker=_required_str(row.get("ticker"), "ticker"),
+        security=_optional_str(row.get("security")),
+        gics_sector=_optional_str(row.get("gics_sector")),
+        current_weight=_optional_float(row.get("current_weight")),
+        target_weight=_optional_float(row.get("target_weight")),
+        trade_weight=_optional_float(row.get("trade_weight")),
+        trade_notional=_optional_float(row.get("trade_notional")),
+        commission_amount=_optional_float(row.get("commission_amount")),
+        cash_required_weight=_optional_float(row.get("cash_required_weight")),
+        cash_released_weight=_optional_float(row.get("cash_released_weight")),
+        deposit_used_amount=_optional_float(row.get("deposit_used_amount")),
+        cash_after_trade_amount=_optional_float(row.get("cash_after_trade_amount")),
+        action=_optional_str(row.get("action")),
+        reason_code=_optional_str(row.get("reason_code")),
+        expected_return=_optional_float(row.get("expected_return")),
+        volatility=_optional_float(row.get("volatility")),
+    )
+
+
+def _date_field(value: object, field_name: str) -> date:
+    if _is_missing(value):
+        msg = f"Missing required account tracking date field: {field_name}"
+        raise ValueError(msg)
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def _required_str(value: object, field_name: str) -> str:
+    text = _optional_str(value)
+    if text is None:
+        msg = f"Missing required account tracking field: {field_name}"
+        raise ValueError(msg)
+    return text
+
+
+def _optional_str(value: object) -> str | None:
+    if _is_missing(value):
+        return None
+    text = str(value)
+    return text or None
+
+
+def _required_float(value: object, field_name: str) -> float:
+    number = _optional_float(value)
+    if number is None:
+        msg = f"Missing required account tracking numeric field: {field_name}"
+        raise ValueError(msg)
+    return number
+
+
+def _optional_float(value: object) -> float | None:
+    if _is_missing(value):
+        return None
+    return float(cast(Any, value))
+
+
+def _is_missing(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        return bool(pd.isna(cast(Any, value)))
+    except (TypeError, ValueError):
+        return False
+
+
+def _string_keyed_row(row: Mapping[object, object]) -> dict[str, object]:
+    return {str(key): value for key, value in row.items()}
 
 
 def _rebalance_context_tickers(

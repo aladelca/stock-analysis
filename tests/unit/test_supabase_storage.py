@@ -19,6 +19,7 @@ from stock_analysis.storage.contracts import (
 from stock_analysis.storage.supabase import (
     SupabaseAccountTrackingRepository,
     SupabaseConfigError,
+    SupabaseRepositoryError,
     create_account_tracking_repository,
     create_supabase_client,
 )
@@ -43,8 +44,15 @@ def test_repository_upserts_account_and_filters_cashflows() -> None:
     client = FakeSupabaseClient()
     repo = SupabaseAccountTrackingRepository(client, SupabaseConfig())
 
-    account = repo.upsert_account(AccountRecord(slug="main", display_name="Main Brokerage"))
+    account = repo.upsert_account(
+        AccountRecord(
+            slug="main",
+            display_name="Main Brokerage",
+            owner_id="user-1",
+        )
+    )
     assert account.id == "accounts-1"
+    assert account.owner_id == "user-1"
     assert repo.get_account_by_slug("main") == account
 
     inserted = repo.insert_cashflow(
@@ -122,6 +130,32 @@ def test_repository_writes_snapshot_and_holding_rows() -> None:
     ]
 
 
+def test_repository_deletes_partial_snapshot_when_holding_insert_fails() -> None:
+    client = FakeSupabaseClient()
+    client.fail_inserts_for.add("holding_snapshots")
+    repo = SupabaseAccountTrackingRepository(client, SupabaseConfig())
+
+    with pytest.raises(SupabaseRepositoryError, match="deleted the partial portfolio snapshot"):
+        repo.insert_portfolio_snapshot(
+            PortfolioSnapshotRecord(
+                account_id="account-1",
+                snapshot_date=date(2026, 4, 24),
+                market_value=900.0,
+                cash_balance=100.0,
+                total_value=1000.0,
+            ),
+            holdings=[
+                HoldingSnapshotRecord(
+                    snapshot_id="pending",
+                    ticker="AAPL",
+                    market_value=400.0,
+                )
+            ],
+        )
+
+    assert client.tables["portfolio_snapshots"] == []
+
+
 def test_repository_writes_recommendations_and_performance_snapshot() -> None:
     client = FakeSupabaseClient()
     repo = SupabaseAccountTrackingRepository(client, SupabaseConfig())
@@ -172,6 +206,7 @@ class FakeResponse:
 class FakeSupabaseClient:
     def __init__(self) -> None:
         self.tables: dict[str, list[dict[str, Any]]] = {}
+        self.fail_inserts_for: set[str] = set()
 
     def table(self, name: str) -> FakeQuery:
         return FakeQuery(self, name)
@@ -199,13 +234,17 @@ class FakeQuery:
 
     def upsert(
         self,
-        payload: dict[str, Any],
+        payload: dict[str, Any] | list[dict[str, Any]],
         *,
         on_conflict: str,
     ) -> FakeQuery:
         self.action = "upsert"
         self.payload = payload
         self.on_conflict = on_conflict
+        return self
+
+    def delete(self) -> FakeQuery:
+        self.action = "delete"
         return self
 
     def eq(self, column: str, value: Any) -> FakeQuery:
@@ -232,10 +271,14 @@ class FakeQuery:
         if self.action == "insert":
             return FakeResponse(self._insert_rows())
         if self.action == "upsert":
-            return FakeResponse([self._upsert_row()])
+            return FakeResponse(self._upsert_rows())
+        if self.action == "delete":
+            return FakeResponse(self._delete_rows())
         return FakeResponse(self._select_rows())
 
     def _insert_rows(self) -> list[dict[str, Any]]:
+        if self.table_name in self.client.fail_inserts_for:
+            raise RuntimeError(f"forced insert failure for {self.table_name}")
         payload = self.payload
         if payload is None:
             raise AssertionError("insert payload is required")
@@ -248,16 +291,28 @@ class FakeQuery:
             inserted.append(stored)
         return inserted
 
-    def _upsert_row(self) -> dict[str, Any]:
-        if not isinstance(self.payload, dict):
-            raise AssertionError("upsert payload must be a row")
+    def _upsert_rows(self) -> list[dict[str, Any]]:
+        if self.payload is None:
+            raise AssertionError("upsert payload is required")
+        rows = self.payload if isinstance(self.payload, list) else [self.payload]
+        return [self._upsert_row(row) for row in rows]
+
+    def _upsert_row(self, payload: dict[str, Any]) -> dict[str, Any]:
         columns = [column.strip() for column in (self.on_conflict or "").split(",")]
         for index, row in enumerate(self._table()):
-            if all(row.get(column) == self.payload.get(column) for column in columns):
-                stored = {**row, **self.payload}
+            if all(row.get(column) == payload.get(column) for column in columns):
+                stored = {**row, **payload}
                 self._table()[index] = stored
                 return stored
-        return self._insert_rows()[0]
+        stored = dict(payload)
+        stored.setdefault("id", f"{self.table_name}-{len(self._table()) + 1}")
+        self._table().append(stored)
+        return stored
+
+    def _delete_rows(self) -> list[dict[str, Any]]:
+        rows = self._select_rows()
+        self.client.tables[self.table_name] = [row for row in self._table() if row not in rows]
+        return rows
 
     def _select_rows(self) -> list[dict[str, Any]]:
         rows = list(self._table())

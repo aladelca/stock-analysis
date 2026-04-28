@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -139,6 +140,10 @@ def test_one_shot_pipeline_uses_actual_live_cashflows(
     assert recommendation_runs["unapplied_cashflow_amount"].iat[0] == pytest.approx(200.0)
     assert recommendation_lines["recommendation_key"].str.startswith("test-run:").all()
     assert "spy_same_cashflow_value" in performance.columns
+    assert repository.recommendation_runs[0].run_id == "test-run"
+    assert repository.recommendation_runs[0].id == "recommendation-run-1"
+    assert len(repository.recommendation_lines) == len(recommendations)
+    assert repository.performance_snapshots[0].account_total_value == pytest.approx(1000.0)
 
     exports = export_existing_run_for_tableau(sample_config, "test-run")
     assert "gold.cashflows.csv" in exports
@@ -180,6 +185,33 @@ def test_export_existing_run_for_tableau_creates_single_table_hyper(
     table_names = _hyper_table_names(outputs["gold.tableau_dashboard_mart.hyper"])
     assert len(table_names) == 1
     assert "portfolio_dashboard_mart" in table_names[0]
+
+
+def test_export_existing_live_run_for_tableau_creates_account_tracking_hyper_tables(
+    sample_html,
+    sample_config,
+    static_price_provider,
+) -> None:
+    sample_config.tableau.export_hyper = True
+    sample_config.live_account.enabled = True
+    sample_config.live_account.account_slug = "main"
+    sample_config.live_account.cashflow_source = "actual"
+    repository = FakeAccountTrackingRepository()
+    run_one_shot(
+        sample_config,
+        universe_html=sample_html,
+        price_provider=static_price_provider,
+        account_repository=repository,
+    )
+
+    outputs = export_existing_run_for_tableau(sample_config, "test-run")
+
+    table_names = _hyper_table_names(outputs["gold.tableau_dashboard_mart.hyper"])
+    assert all(
+        any(expected in table_name for table_name in table_names)
+        for expected in {"portfolio_dashboard_mart", "cashflows", "performance_snapshots"}
+    )
+    assert len(table_names) == 7
 
 
 def test_one_shot_pipeline_can_use_ml_forecast_engine(sample_html, tmp_path: Path) -> None:
@@ -261,6 +293,9 @@ class FakeAccountTrackingRepository:
                 cashflow_type="deposit",
             )
         ]
+        self.recommendation_runs: list[RecommendationRunRecord] = []
+        self.recommendation_lines: list[RecommendationLineRecord] = []
+        self.performance_snapshots: list[PerformanceSnapshotRecord] = []
 
     def get_account_by_slug(self, slug: str) -> AccountRecord | None:
         if slug == self.account.slug:
@@ -319,19 +354,31 @@ class FakeAccountTrackingRepository:
         return [holding for holding in self.holdings if holding.snapshot_id == snapshot_id]
 
     def insert_recommendation_run(self, run: RecommendationRunRecord) -> RecommendationRunRecord:
-        return run
+        persisted = replace(run, id=f"recommendation-run-{len(self.recommendation_runs) + 1}")
+        self.recommendation_runs.append(persisted)
+        return persisted
 
     def insert_recommendation_lines(
         self,
         lines: list[RecommendationLineRecord],
     ) -> list[RecommendationLineRecord]:
-        return lines
+        persisted = [
+            replace(line, id=f"recommendation-line-{len(self.recommendation_lines) + index + 1}")
+            for index, line in enumerate(lines)
+        ]
+        self.recommendation_lines.extend(persisted)
+        return persisted
 
     def insert_performance_snapshot(
         self,
         snapshot: PerformanceSnapshotRecord,
     ) -> PerformanceSnapshotRecord:
-        return snapshot
+        persisted = replace(
+            snapshot,
+            id=f"performance-snapshot-{len(self.performance_snapshots) + 1}",
+        )
+        self.performance_snapshots.append(persisted)
+        return persisted
 
 
 class _LongStaticPriceProvider:
