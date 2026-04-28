@@ -280,10 +280,55 @@ FIELDS: dict[str, TableauField] = {
     ),
     "run_expected_return_is_calibrated": TableauField(
         "run_expected_return_is_calibrated",
-        "string",
+        "boolean",
         "dimension",
         "nominal",
         "Run Expected Return Is Calibrated",
+    ),
+    "run_optimizer_return_unit": TableauField(
+        "run_optimizer_return_unit", "string", "dimension", "nominal", "Optimizer Return Unit"
+    ),
+    "run_calibration_enabled": TableauField(
+        "run_calibration_enabled", "boolean", "dimension", "nominal", "Calibration Enabled"
+    ),
+    "run_calibration_method": TableauField(
+        "run_calibration_method", "string", "dimension", "nominal", "Calibration Method"
+    ),
+    "run_calibration_target": TableauField(
+        "run_calibration_target", "string", "dimension", "nominal", "Calibration Target"
+    ),
+    "run_calibration_model_version": TableauField(
+        "run_calibration_model_version",
+        "string",
+        "dimension",
+        "nominal",
+        "Calibration Model Version",
+    ),
+    "run_calibration_status": TableauField(
+        "run_calibration_status", "string", "dimension", "nominal", "Calibration Status"
+    ),
+    "run_calibration_trained_through_date": TableauField(
+        "run_calibration_trained_through_date",
+        "date",
+        "dimension",
+        "nominal",
+        "Calibration Trained Through Date",
+    ),
+    "run_calibration_observations": TableauField(
+        "run_calibration_observations",
+        "integer",
+        "measure",
+        "quantitative",
+        "Calibration Observations",
+    ),
+    "run_calibration_mae": TableauField(
+        "run_calibration_mae", "real", "measure", "quantitative", "Calibration MAE"
+    ),
+    "run_calibration_rmse": TableauField(
+        "run_calibration_rmse", "real", "measure", "quantitative", "Calibration RMSE"
+    ),
+    "run_calibration_rank_ic": TableauField(
+        "run_calibration_rank_ic", "real", "measure", "quantitative", "Calibration Rank IC"
     ),
     "portfolio_footer_label": TableauField(
         "portfolio_footer_label",

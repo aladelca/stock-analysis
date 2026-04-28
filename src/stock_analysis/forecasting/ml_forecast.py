@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import cast
+
 import numpy as np
 import pandas as pd
 
 from stock_analysis.config import ForecastConfig
 from stock_analysis.domain.schemas import validate_columns
+from stock_analysis.forecasting.calibration import (
+    ForecastCalibrationResult,
+    ModelFactory,
+    calibrate_forecast_scores,
+    disabled_calibration_diagnostics,
+    empty_calibration_predictions,
+)
 from stock_analysis.ml.autoresearch_candidate import (
     CandidateSpec,
     build_model_factory,
@@ -14,6 +24,14 @@ from stock_analysis.ml.autoresearch_candidate import (
 from stock_analysis.ml.phase2 import DEFAULT_FEATURE_CANDIDATES, BlendedForecastModel
 
 
+@dataclass(frozen=True)
+class MLOptimizerInputResult:
+    optimizer_input: pd.DataFrame
+    covariance: pd.DataFrame
+    calibration_predictions: pd.DataFrame
+    calibration_diagnostics: pd.DataFrame
+
+
 def build_ml_optimizer_inputs(
     feature_panel: pd.DataFrame,
     labels_panel: pd.DataFrame,
@@ -21,6 +39,18 @@ def build_ml_optimizer_inputs(
     config: ForecastConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Train the selected Phase 2 blend and build optimizer inputs for the latest date."""
+
+    result = build_ml_optimizer_inputs_with_artifacts(feature_panel, labels_panel, returns, config)
+    return result.optimizer_input, result.covariance
+
+
+def build_ml_optimizer_inputs_with_artifacts(
+    feature_panel: pd.DataFrame,
+    labels_panel: pd.DataFrame,
+    returns: pd.DataFrame,
+    config: ForecastConfig,
+) -> MLOptimizerInputResult:
+    """Train the selected Phase 2 blend and return optimizer inputs plus calibration artifacts."""
 
     if feature_panel.empty:
         msg = "Cannot build ML optimizer inputs from an empty feature panel"
@@ -58,25 +88,39 @@ def build_ml_optimizer_inputs(
         msg = "No labeled training rows are available for ML optimizer input generation"
         raise ValueError(msg)
 
-    model = (
-        build_model_factory(candidate, feature_columns)(train)
-        if candidate is not None
-        else BlendedForecastModel(
-            train,
-            feature_columns=feature_columns,
-            return_target_column=target_column,
-            random_seed=config.ml_random_seed,
-            nested_cv=config.ml_lightgbm_nested_cv,
-            inner_folds=config.ml_lightgbm_inner_folds,
-        )
-    )
+    model_factory = _model_factory(candidate, feature_columns, config, target_column)
+    model = model_factory(train)
     forecast_score = np.asarray(model.predict(latest_features), dtype=float) * float(
         config.ml_score_scale
     )
 
     optimizer_input = latest_features.copy()
     optimizer_input["forecast_score"] = forecast_score
-    optimizer_input["expected_return"] = optimizer_input["forecast_score"]
+    calibration = _calibration_result(
+        panel=panel,
+        labels=labels,
+        latest_features=optimizer_input,
+        model_factory=model_factory,
+        feature_columns=feature_columns,
+        target_column=target_column,
+        horizon_days=_horizon_days(config, candidate),
+        config=config,
+    )
+    calibration_enabled = (
+        config.ml_calibration_enabled
+        and config.ml_use_calibrated_expected_return
+        and calibration.is_calibrated
+    )
+    if calibration_enabled:
+        calibrated = calibration.calibrated_latest.reindex(optimizer_input.index)
+        optimizer_input["calibrated_expected_return"] = calibrated
+        optimizer_input["expected_return"] = calibrated
+        optimizer_input["expected_return_is_calibrated"] = True
+    else:
+        optimizer_input["calibrated_expected_return"] = np.nan
+        optimizer_input["expected_return"] = optimizer_input["forecast_score"]
+        optimizer_input["expected_return_is_calibrated"] = False
+    optimizer_input["calibration_status"] = _calibration_status(calibration)
     optimizer_input["volatility"] = _volatility(optimizer_input)
     optimizer_input["eligible_for_optimization"] = (
         np.isfinite(optimizer_input["expected_return"].astype(float))
@@ -85,7 +129,6 @@ def build_ml_optimizer_inputs(
     )
     optimizer_input["forecast_engine"] = "ml"
     optimizer_input["forecast_model_version"] = config.ml_model_version
-    optimizer_input["expected_return_is_calibrated"] = False
     optimizer_input["as_of_date"] = latest_date.date().isoformat()
 
     columns = [
@@ -95,11 +138,13 @@ def build_ml_optimizer_inputs(
         *[column for column in ["is_benchmark_candidate"] if column in optimizer_input.columns],
         "expected_return",
         "forecast_score",
+        "calibrated_expected_return",
         "volatility",
         "eligible_for_optimization",
         "forecast_engine",
         "forecast_model_version",
         "expected_return_is_calibrated",
+        "calibration_status",
         "as_of_date",
         *feature_columns,
     ]
@@ -108,8 +153,89 @@ def build_ml_optimizer_inputs(
             optimizer_input[column] = pd.NA
 
     result = optimizer_input[columns].sort_values("ticker").reset_index(drop=True)
-    covariance = _covariance_matrix(returns, result, config.covariance_lookback_days)
-    return validate_columns(result, "optimizer_input"), covariance
+    covariance = _covariance_matrix(
+        returns,
+        result,
+        config.covariance_lookback_days,
+        scale_days=_horizon_days(config, candidate) if calibration_enabled else 252,
+    )
+    return MLOptimizerInputResult(
+        optimizer_input=validate_columns(result, "optimizer_input"),
+        covariance=covariance,
+        calibration_predictions=calibration.predictions,
+        calibration_diagnostics=calibration.diagnostics,
+    )
+
+
+def _model_factory(
+    candidate: CandidateSpec | None,
+    feature_columns: tuple[str, ...],
+    config: ForecastConfig,
+    target_column: str,
+) -> ModelFactory:
+    if candidate is not None:
+        return cast(ModelFactory, build_model_factory(candidate, feature_columns))
+
+    def factory(train_df: pd.DataFrame) -> BlendedForecastModel:
+        return BlendedForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            return_target_column=target_column,
+            random_seed=config.ml_random_seed,
+            nested_cv=config.ml_lightgbm_nested_cv,
+            inner_folds=config.ml_lightgbm_inner_folds,
+        )
+
+    return factory
+
+
+def _calibration_result(
+    *,
+    panel: pd.DataFrame,
+    labels: pd.DataFrame,
+    latest_features: pd.DataFrame,
+    model_factory: ModelFactory,
+    feature_columns: tuple[str, ...],
+    target_column: str,
+    horizon_days: int,
+    config: ForecastConfig,
+) -> ForecastCalibrationResult:
+    if not config.ml_calibration_enabled:
+        return ForecastCalibrationResult(
+            calibrated_latest=pd.Series(
+                np.nan,
+                index=latest_features.index,
+                name="calibrated_expected_return",
+            ),
+            predictions=empty_calibration_predictions(),
+            diagnostics=disabled_calibration_diagnostics(
+                method=config.ml_calibration_method,
+                target_column=target_column,
+                horizon_days=horizon_days,
+            ),
+        )
+    return calibrate_forecast_scores(
+        panel=panel,
+        labels=labels,
+        latest_features=latest_features,
+        model_factory=model_factory,
+        feature_columns=feature_columns,
+        target_column=target_column,
+        horizon_days=horizon_days,
+        score_scale=config.ml_score_scale,
+        method=config.ml_calibration_method,
+        min_observations=config.ml_calibration_min_observations,
+        splits=config.ml_calibration_splits,
+        embargo_days=max(config.ml_calibration_embargo_days, horizon_days),
+        shrinkage=config.ml_calibration_shrinkage,
+        lookback_days=config.ml_calibration_lookback_days,
+    )
+
+
+def _calibration_status(calibration: ForecastCalibrationResult) -> str:
+    if calibration.diagnostics.empty or "calibration_status" not in calibration.diagnostics:
+        return "unknown"
+    return str(calibration.diagnostics["calibration_status"].iat[0])
 
 
 def _prepare_panel(feature_panel: pd.DataFrame) -> pd.DataFrame:
@@ -171,6 +297,12 @@ def _target_column(config: ForecastConfig, candidate: CandidateSpec | None) -> s
     return f"fwd_return_{config.ml_horizon_days}d"
 
 
+def _horizon_days(config: ForecastConfig, candidate: CandidateSpec | None) -> int:
+    if candidate is not None:
+        return candidate.horizon_days
+    return config.ml_horizon_days
+
+
 def _volatility(frame: pd.DataFrame) -> pd.Series:
     volatility_columns = [column for column in frame.columns if column.startswith("volatility_")]
     if not volatility_columns:
@@ -185,6 +317,8 @@ def _covariance_matrix(
     returns: pd.DataFrame,
     optimizer_input: pd.DataFrame,
     covariance_lookback_days: int,
+    *,
+    scale_days: int,
 ) -> pd.DataFrame:
     returns_matrix = returns.copy()
     returns_matrix["date"] = pd.to_datetime(returns_matrix["date"])
@@ -198,7 +332,7 @@ def _covariance_matrix(
         optimizer_input["eligible_for_optimization"].astype(bool),
         "ticker",
     ].tolist()
-    covariance = pivot.reindex(columns=eligible).fillna(0).cov() * 252
+    covariance = pivot.reindex(columns=eligible).fillna(0).cov() * scale_days
     covariance = covariance.fillna(0)
     for ticker in covariance.columns:
         diagonal_value = float(covariance.loc[[ticker], [ticker]].to_numpy(dtype=float)[0, 0])

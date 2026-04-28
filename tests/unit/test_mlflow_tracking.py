@@ -164,7 +164,18 @@ def test_log_portfolio_run_logs_trade_metrics_and_artifacts(
                 "config_hash": ["abc123"],
                 "universe_count": [500],
                 "price_row_count": [1000],
-                "expected_return_is_calibrated": [False],
+                "expected_return_is_calibrated": [True],
+                "optimizer_return_unit": ["5d_return"],
+                "calibration_enabled": [True],
+                "calibration_method": ["isotonic"],
+                "calibration_target": ["fwd_return_5d"],
+                "calibration_model_version": ["lightgbm_return_zscore:isotonic"],
+                "calibration_status": ["calibrated"],
+                "calibration_trained_through_date": ["2026-04-22"],
+                "calibration_observations": [250],
+                "calibration_mae": [0.01],
+                "calibration_rmse": [0.015],
+                "calibration_rank_ic": [0.2],
             }
         ),
         artifacts=[artifact, tmp_path / "missing.parquet"],
@@ -176,6 +187,9 @@ def test_log_portfolio_run_logs_trade_metrics_and_artifacts(
     assert fake_mlflow.run_name == "portfolio-run-1"
     assert fake_mlflow.tags["stock_analysis.workflow"] == "one_shot_portfolio"
     assert fake_mlflow.params["optimizer.commission_rate"] == 0.02
+    assert fake_mlflow.params["run_metadata.optimizer_return_unit"] == "5d_return"
+    assert fake_mlflow.params["run_metadata.calibration_status"] == "calibrated"
+    assert fake_mlflow.params["run_metadata.calibration_observations"] == 250
     assert fake_mlflow.metrics["recommendations.num_buy"] == 1.0
     assert fake_mlflow.metrics["recommendations.num_sell"] == 1.0
     assert fake_mlflow.metrics["recommendations.estimated_commission_weight"] == 0.006

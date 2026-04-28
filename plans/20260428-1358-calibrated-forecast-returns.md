@@ -10,6 +10,9 @@
 - User request: "lets do calibrated, what do we need" followed by "can you create a plan to do this?"
 - Owner or issue: `stock-analysis-bvf`
 - Plan file: `plans/20260428-1358-calibrated-forecast-returns.md`
+- Implementation status: implemented in this branch. The default `configs/portfolio.yaml` enables
+  calibration; uncalibrated behavior remains available by setting `forecast.ml_calibration_enabled`
+  to `false`.
 
 ## Current State
 
@@ -114,7 +117,8 @@
 
 1. Add calibration config to `ForecastConfig`.
    - Include explicit defaults and validation constraints.
-   - Keep `ml_calibration_enabled` default false until validation proves acceptable diagnostics.
+   - Keep the model-level default conservative, but enable calibration explicitly in the production
+     config after tests pass.
    - Add production config values in `configs/portfolio.yaml`.
 
 2. Create `src/stock_analysis/forecasting/calibration.py`.
@@ -185,7 +189,8 @@
 - Integration: `tests/integration/test_one_shot_pipeline.py`
   - ML one-shot with calibration writes `forecast_calibration_predictions`, `forecast_calibration_diagnostics`, calibrated recommendations, run metadata, and repository records.
 - Regression:
-  - Existing uncalibrated one-shot tests continue to pass with default calibration disabled.
+  - Existing uncalibrated one-shot tests continue to pass when calibration is disabled in test
+    config.
   - Existing Tableau export history remains stable when calibration fields are null.
 
 ## Validation

@@ -271,7 +271,8 @@ Refresh the workbook in Tableau Cloud. If `run_id` changes in the footer, the lo
 
 - `action` supports BUY, SELL, HOLD, and EXCLUDE, but true sell/hold semantics require a configured
   current holdings file.
-- `forecast_score` is a heuristic score, not a calibrated expected return.
+- `forecast_score` is a ranking signal. Use `calibrated_expected_return` as expected percentage
+  return only when `expected_return_is_calibrated = true`.
 - No time-series dashboard yet because the mart is one run, one decision.
 - Sector exposure is shown, but benchmark-relative sector bands are not implemented.
 

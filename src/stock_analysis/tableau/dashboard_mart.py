@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pandas as pd
 
 from stock_analysis.tableau.account_tracking_marts import latest_performance_fields
@@ -59,7 +61,7 @@ def build_dashboard_mart(
     for column, metric_value in risk_wide.items():
         mart[f"portfolio_{column}"] = metric_value
     for column, metadata_value in metadata.items():
-        mart[f"run_{column}"] = metadata_value
+        mart[f"run_{column}"] = [metadata_value] * len(mart)  # type: ignore[assignment]
     for column, performance_value in performance.items():
         mart[column] = [performance_value] * len(mart)  # type: ignore[assignment]
 
@@ -85,6 +87,7 @@ def build_dashboard_mart(
             "forecast_end_date",
             "run_requested_as_of_date",
             "run_data_as_of_date",
+            "run_calibration_trained_through_date",
         ],
     )
 
@@ -175,6 +178,17 @@ def build_dashboard_mart(
         "run_config_hash",
         "run_config_hash_short",
         "run_expected_return_is_calibrated",
+        "run_optimizer_return_unit",
+        "run_calibration_enabled",
+        "run_calibration_method",
+        "run_calibration_target",
+        "run_calibration_model_version",
+        "run_calibration_status",
+        "run_calibration_trained_through_date",
+        "run_calibration_observations",
+        "run_calibration_mae",
+        "run_calibration_rmse",
+        "run_calibration_rank_ic",
     ]
     for column in column_order:
         if column not in mart.columns:
@@ -194,12 +208,12 @@ def _risk_metrics_wide(risk_metrics: pd.DataFrame) -> dict[str, float]:
     return {name: float(metric_values[index]) for index, name in enumerate(metric_names)}
 
 
-def _single_row_metadata(run_metadata: pd.DataFrame) -> dict[str, str]:
+def _single_row_metadata(run_metadata: pd.DataFrame) -> dict[str, object]:
     if run_metadata.empty:
         return {}
     row = run_metadata.iloc[0].to_dict()
     return {
-        key: str(value)
+        key: value
         for key, value in row.items()
         if key
         in {
@@ -208,6 +222,17 @@ def _single_row_metadata(run_metadata: pd.DataFrame) -> dict[str, str]:
             "created_at_utc",
             "config_hash",
             "expected_return_is_calibrated",
+            "optimizer_return_unit",
+            "calibration_enabled",
+            "calibration_method",
+            "calibration_target",
+            "calibration_model_version",
+            "calibration_status",
+            "calibration_trained_through_date",
+            "calibration_observations",
+            "calibration_mae",
+            "calibration_rmse",
+            "calibration_rank_ic",
             "live_account_enabled",
             "live_account_slug",
             "live_cashflow_source",
@@ -216,7 +241,17 @@ def _single_row_metadata(run_metadata: pd.DataFrame) -> dict[str, str]:
             "live_unapplied_cashflow_amount",
             "live_unapplied_cashflow_count",
         }
+        and _metadata_value_is_present(value)
     }
+
+
+def _metadata_value_is_present(value: object) -> bool:
+    if value is None:
+        return False
+    try:
+        return not bool(pd.isna(cast(Any, value)))
+    except (TypeError, ValueError):
+        return True
 
 
 def _safe_ratio(numerator: pd.Series | None, denominator: pd.Series | None) -> pd.Series:

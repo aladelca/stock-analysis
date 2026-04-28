@@ -44,6 +44,15 @@ forecast:
   ml_lightgbm_nested_cv: false
   ml_lightgbm_inner_folds: 2
   ml_random_seed: 42
+  ml_calibration_enabled: true
+  ml_calibration_method: isotonic
+  ml_calibration_target: return
+  ml_calibration_min_observations: 200
+  ml_calibration_lookback_days: null
+  ml_calibration_splits: 5
+  ml_calibration_embargo_days: 15
+  ml_calibration_shrinkage: 0.25
+  ml_use_calibrated_expected_return: true
 
 optimizer:
   max_weight: 0.24

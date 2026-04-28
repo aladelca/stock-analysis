@@ -37,6 +37,8 @@ def test_account_tracking_marts_include_cashflows_performance_and_recommendation
     }
     assert tables["cashflows"]["is_applied_to_recommendation"].tolist() == [False, True]
     assert tables["recommendation_runs"]["unapplied_cashflow_amount"].iat[0] == pytest.approx(100.0)
+    assert tables["recommendation_runs"]["optimizer_return_unit"].iat[0] == "5d_return"
+    assert tables["recommendation_runs"]["calibration_status"].iat[0] == "calibrated"
     assert tables["recommendation_lines"]["recommendation_key"].iat[0] == "run-1:AAPL"
     assert tables["recommendation_lines"]["forecast_score"].iat[0] == pytest.approx(0.2)
     assert tables["recommendation_lines"]["forecast_horizon_days"].iat[0] == 5
@@ -88,6 +90,8 @@ def test_dashboard_mart_exposes_latest_account_performance_fields() -> None:
     assert mart["account_initial_value"].iat[0] == pytest.approx(1000.0)
     assert mart["account_invested_capital"].iat[0] == pytest.approx(1100.0)
     assert mart["run_live_cashflow_source"].iat[0] == "actual"
+    assert mart["run_optimizer_return_unit"].iat[0] == "5d_return"
+    assert mart["run_calibration_status"].iat[0] == "calibrated"
 
 
 def test_dashboard_mart_ignores_solver_dust_for_selected_rows() -> None:
@@ -269,6 +273,18 @@ def _run_metadata() -> pd.DataFrame:
                 "live_snapshot_date": "2026-01-10",
                 "live_unapplied_cashflow_amount": 100.0,
                 "live_unapplied_cashflow_count": 1,
+                "expected_return_is_calibrated": True,
+                "optimizer_return_unit": "5d_return",
+                "calibration_enabled": True,
+                "calibration_method": "isotonic",
+                "calibration_target": "fwd_return_5d",
+                "calibration_model_version": "lightgbm_return_zscore:isotonic",
+                "calibration_status": "calibrated",
+                "calibration_trained_through_date": "2026-01-09",
+                "calibration_observations": 240,
+                "calibration_mae": 0.01,
+                "calibration_rmse": 0.015,
+                "calibration_rank_ic": 0.2,
             }
         ]
     )

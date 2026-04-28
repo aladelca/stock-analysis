@@ -4,7 +4,10 @@ import numpy as np
 import pandas as pd
 
 from stock_analysis.config import ForecastConfig
-from stock_analysis.forecasting.ml_forecast import build_ml_optimizer_inputs
+from stock_analysis.forecasting.ml_forecast import (
+    build_ml_optimizer_inputs,
+    build_ml_optimizer_inputs_with_artifacts,
+)
 
 
 def test_build_ml_optimizer_inputs_uses_phase2_blend_and_liquidity_filter() -> None:
@@ -88,3 +91,29 @@ def test_build_ml_optimizer_inputs_uses_phase2_blend_and_liquidity_filter() -> N
     assert optimizer_input["eligible_for_optimization"].all()
     assert set(covariance.columns) == set(optimizer_input["ticker"])
     assert set(optimizer_input["ticker"]) == {"T2", "T3", "T4", "T5"}
+
+    calibrated = build_ml_optimizer_inputs_with_artifacts(
+        pd.DataFrame(panel_rows),
+        pd.DataFrame(label_rows),
+        pd.DataFrame(return_rows),
+        ForecastConfig(
+            engine="ml",
+            covariance_lookback_days=40,
+            ml_max_assets=4,
+            ml_feature_columns=["momentum_21d", "volatility_63d", "return_5d"],
+            ml_score_scale=0.5,
+            ml_lightgbm_nested_cv=False,
+            ml_calibration_enabled=True,
+            ml_calibration_min_observations=20,
+            ml_calibration_splits=3,
+            ml_calibration_embargo_days=1,
+            ml_calibration_shrinkage=0.0,
+        ),
+    )
+
+    assert calibrated.optimizer_input["expected_return_is_calibrated"].all()
+    assert calibrated.optimizer_input["calibrated_expected_return"].notna().all()
+    assert calibrated.optimizer_input["expected_return"].notna().all()
+    assert calibrated.calibration_diagnostics["calibration_status"].iat[0] == "calibrated"
+    assert calibrated.calibration_diagnostics["calibration_observations"].iat[0] >= 20
+    assert not calibrated.calibration_predictions.empty

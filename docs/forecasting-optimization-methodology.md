@@ -625,7 +625,9 @@ The current implementation assumes:
 
 ## Known Limitations
 
-- The forecast score is not calibrated to realized future returns.
+- Calibrated expected returns are available only when the calibration gate passes. If calibration is
+  disabled or fails minimum-observation checks, `forecast_score` remains a ranking signal rather
+  than a predicted percentage return.
 - Missing returns are filled with zero in the covariance matrix, which can understate risk for sparse assets.
 - Transaction costs are modeled as a flat percentage commission, not market impact or spread cost.
 - Current portfolio input is weight-based; share-count order generation is not implemented.
@@ -639,7 +641,8 @@ The current implementation assumes:
 
 ## Recommended Next Methodology Improvements
 
-1. Rename `expected_return` to `forecast_score` or add a calibrated `expected_return` field separately.
+1. Add a stronger walk-forward validation gate for calibrated expected returns, including bucket
+   calibration plots and post-cost SPY comparison.
 2. Add walk-forward backtesting with out-of-sample evaluation.
 3. Add covariance shrinkage, such as Ledoit-Wolf, to improve stability.
 4. Add transaction costs and turnover constraints.

@@ -219,6 +219,17 @@ def _params_for_portfolio_run(
             "universe_count": metadata.get("universe_count"),
             "price_row_count": metadata.get("price_row_count"),
             "expected_return_is_calibrated": metadata.get("expected_return_is_calibrated"),
+            "optimizer_return_unit": metadata.get("optimizer_return_unit"),
+            "calibration_enabled": metadata.get("calibration_enabled"),
+            "calibration_method": metadata.get("calibration_method"),
+            "calibration_target": metadata.get("calibration_target"),
+            "calibration_model_version": metadata.get("calibration_model_version"),
+            "calibration_status": metadata.get("calibration_status"),
+            "calibration_trained_through_date": metadata.get("calibration_trained_through_date"),
+            "calibration_observations": metadata.get("calibration_observations"),
+            "calibration_mae": metadata.get("calibration_mae"),
+            "calibration_rmse": metadata.get("calibration_rmse"),
+            "calibration_rank_ic": metadata.get("calibration_rank_ic"),
         },
     }
     params: dict[str, str | int | float | bool] = {}

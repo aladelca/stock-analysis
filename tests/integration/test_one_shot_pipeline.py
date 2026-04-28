@@ -54,6 +54,8 @@ def test_one_shot_pipeline_writes_outputs(
     assert (output_root / "gold" / "labels_panel.parquet").exists()
     assert (output_root / "gold" / "portfolio_recommendations.parquet").exists()
     assert (output_root / "gold" / "csv" / "portfolio_recommendations.csv").exists()
+    assert (output_root / "gold" / "forecast_calibration_diagnostics.parquet").exists()
+    assert (output_root / "gold" / "forecast_calibration_predictions.parquet").exists()
 
     recommendations = pd.read_parquet(output_root / "gold" / "portfolio_recommendations.parquet")
     assert {
@@ -175,6 +177,7 @@ def test_one_shot_pipeline_uses_actual_live_cashflows(
     exports = export_existing_run_for_tableau(sample_config, "test-run")
     assert "gold.cashflows.csv" in exports
     assert "gold.performance_snapshots.csv" in exports
+    assert "gold.forecast_calibration_diagnostics.csv" in exports
 
 
 def test_export_existing_run_for_tableau_includes_account_history(
@@ -277,8 +280,9 @@ def test_export_existing_run_for_tableau_creates_single_table_hyper(
 
     assert outputs["gold.tableau_dashboard_mart.hyper"].exists()
     table_names = _hyper_table_names(outputs["gold.tableau_dashboard_mart.hyper"])
-    assert len(table_names) == 1
-    assert "portfolio_dashboard_mart" in table_names[0]
+    assert any("portfolio_dashboard_mart" in table_name for table_name in table_names)
+    assert any("forecast_calibration_diagnostics" in table_name for table_name in table_names)
+    assert any("forecast_calibration_predictions" in table_name for table_name in table_names)
 
 
 def test_export_existing_live_run_for_tableau_creates_account_tracking_hyper_tables(
@@ -305,44 +309,13 @@ def test_export_existing_live_run_for_tableau_creates_account_tracking_hyper_tab
         any(expected in table_name for table_name in table_names)
         for expected in {"portfolio_dashboard_mart", "cashflows", "performance_snapshots"}
     )
-    assert len(table_names) == 7
+    assert any("forecast_calibration_diagnostics" in table_name for table_name in table_names)
+    assert any("forecast_calibration_predictions" in table_name for table_name in table_names)
+    assert len(table_names) == 9
 
 
 def test_one_shot_pipeline_can_use_ml_forecast_engine(sample_html, tmp_path: Path) -> None:
-    config = PortfolioConfig(
-        run=RunConfig(
-            as_of_date=date(2026, 4, 24),
-            output_root=tmp_path / "data",
-            run_id="ml-run",
-        ),
-        prices=PriceConfig(lookback_years=1, batch_size=10),
-        features=FeatureConfig(
-            min_history_days=30,
-            momentum_windows=[5, 10],
-            volatility_window=5,
-            drawdown_window=10,
-            moving_average_windows=[5, 10],
-        ),
-        panel_features=PanelFeatureConfig(
-            min_history_days=30,
-            momentum_windows=[21],
-            volatility_windows=[21],
-            drawdown_windows=[21],
-            moving_average_windows=[10, 21],
-            return_windows=[5, 21],
-            volume_zscore_window=5,
-        ),
-        forecast=ForecastConfig(
-            engine="ml",
-            covariance_lookback_days=40,
-            label_horizons=[5, 21],
-            ml_max_assets=4,
-            ml_feature_columns=["momentum_21d", "volatility_21d", "return_5d"],
-            ml_lightgbm_nested_cv=False,
-        ),
-        optimizer=OptimizerConfig(max_weight=0.6, risk_aversion=1.0, min_trade_weight=0.001),
-        tableau=TableauConfig(export_csv=True, export_hyper=False, publish_enabled=False),
-    )
+    config = _ml_portfolio_config(tmp_path, "ml-run")
 
     result = run_one_shot(
         config,
@@ -353,12 +326,55 @@ def test_one_shot_pipeline_can_use_ml_forecast_engine(sample_html, tmp_path: Pat
     optimizer_input = pd.read_parquet(output_root / "gold" / "optimizer_input.parquet")
     recommendations = pd.read_parquet(output_root / "gold" / "portfolio_recommendations.parquet")
     metadata = pd.read_parquet(output_root / "gold" / "run_metadata.parquet")
+    diagnostics = pd.read_parquet(output_root / "gold" / "forecast_calibration_diagnostics.parquet")
+    predictions = pd.read_parquet(output_root / "gold" / "forecast_calibration_predictions.parquet")
 
     assert optimizer_input["forecast_engine"].eq("ml").all()
     assert optimizer_input["forecast_model_version"].eq("lightgbm_return_zscore").all()
     assert recommendations["target_weight"].sum() == pytest.approx(1.0)
     assert metadata["forecast_engine"].iat[0] == "ml"
     assert not bool(metadata["expected_return_is_calibrated"].iat[0])
+    assert metadata["calibration_status"].iat[0] == "disabled"
+    assert diagnostics["calibration_status"].iat[0] == "disabled"
+    assert list(predictions.columns) == [
+        "ticker",
+        "date",
+        "forecast_score",
+        "realized_return",
+        "train_cutoff_date",
+        "calibration_fold_start_date",
+        "calibrated_expected_return",
+    ]
+
+
+def test_one_shot_pipeline_can_emit_calibrated_ml_forecasts(
+    sample_html,
+    tmp_path: Path,
+) -> None:
+    config = _ml_portfolio_config(tmp_path, "ml-calibrated-run", calibration_enabled=True)
+
+    result = run_one_shot(
+        config,
+        universe_html=sample_html,
+        price_provider=_LongStaticPriceProvider(_ml_fixture_prices()),
+    )
+    output_root = Path(result.output_root)
+    optimizer_input = pd.read_parquet(output_root / "gold" / "optimizer_input.parquet")
+    recommendations = pd.read_parquet(output_root / "gold" / "portfolio_recommendations.parquet")
+    metadata = pd.read_parquet(output_root / "gold" / "run_metadata.parquet")
+    diagnostics = pd.read_parquet(output_root / "gold" / "forecast_calibration_diagnostics.parquet")
+    predictions = pd.read_parquet(output_root / "gold" / "forecast_calibration_predictions.parquet")
+
+    assert optimizer_input["expected_return_is_calibrated"].all()
+    assert optimizer_input["expected_return"].equals(optimizer_input["calibrated_expected_return"])
+    assert recommendations["expected_return_is_calibrated"].all()
+    assert recommendations["calibrated_expected_return"].notna().all()
+    assert metadata["expected_return_is_calibrated"].iat[0]
+    assert metadata["optimizer_return_unit"].iat[0] == "5d_return"
+    assert metadata["calibration_status"].iat[0] == "calibrated"
+    assert diagnostics["calibration_status"].iat[0] == "calibrated"
+    assert diagnostics["calibration_observations"].iat[0] >= 20
+    assert not predictions.empty
 
 
 class FakeAccountTrackingRepository:
@@ -518,6 +534,53 @@ class _LongStaticPriceProvider:
         del start, end, as_of_date
         result = self.prices.loc[self.prices["provider_ticker"].isin(set(tickers))].copy()
         return PriceDownload(prices=result, raw_payloads={"static_prices.csv": result.to_csv()})
+
+
+def _ml_portfolio_config(
+    tmp_path: Path,
+    run_id: str,
+    *,
+    calibration_enabled: bool = False,
+) -> PortfolioConfig:
+    return PortfolioConfig(
+        run=RunConfig(
+            as_of_date=date(2026, 4, 24),
+            output_root=tmp_path / "data",
+            run_id=run_id,
+        ),
+        prices=PriceConfig(lookback_years=1, batch_size=10),
+        features=FeatureConfig(
+            min_history_days=30,
+            momentum_windows=[5, 10],
+            volatility_window=5,
+            drawdown_window=10,
+            moving_average_windows=[5, 10],
+        ),
+        panel_features=PanelFeatureConfig(
+            min_history_days=30,
+            momentum_windows=[21],
+            volatility_windows=[21],
+            drawdown_windows=[21],
+            moving_average_windows=[10, 21],
+            return_windows=[5, 21],
+            volume_zscore_window=5,
+        ),
+        forecast=ForecastConfig(
+            engine="ml",
+            covariance_lookback_days=40,
+            label_horizons=[5, 21],
+            ml_max_assets=4,
+            ml_feature_columns=["momentum_21d", "volatility_21d", "return_5d"],
+            ml_lightgbm_nested_cv=False,
+            ml_calibration_enabled=calibration_enabled,
+            ml_calibration_min_observations=20,
+            ml_calibration_splits=3,
+            ml_calibration_embargo_days=5,
+            ml_calibration_shrinkage=0.0,
+        ),
+        optimizer=OptimizerConfig(max_weight=0.6, risk_aversion=1.0, min_trade_weight=0.001),
+        tableau=TableauConfig(export_csv=True, export_hyper=False, publish_enabled=False),
+    )
 
 
 def _ml_fixture_prices() -> pd.DataFrame:

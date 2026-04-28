@@ -172,6 +172,8 @@ Recommended cadence:
 
 The live run writes the standard recommendation outputs plus these Tableau-ready gold tables:
 
+- `forecast_calibration_diagnostics`
+- `forecast_calibration_predictions`
 - `cashflows`
 - `portfolio_snapshots`
 - `holding_snapshots`
@@ -182,6 +184,20 @@ The live run writes the standard recommendation outputs plus these Tableau-ready
 CSV mirrors are written under `data/runs/<run_id>/gold/csv/`. `export-tableau` also mirrors these tables when they exist in an existing run.
 
 For live account runs, `recommendation_runs`, `recommendation_lines`, and `performance_snapshots` are also persisted back to Supabase after the local gold artifacts are written.
+
+Recommendation runs include calibration metadata:
+
+- `optimizer_return_unit`
+- `calibration_enabled`
+- `calibration_method`
+- `calibration_target`
+- `calibration_model_version`
+- `calibration_status`
+- `calibration_trained_through_date`
+- `calibration_observations`
+- `calibration_mae`
+- `calibration_rmse`
+- `calibration_rank_ic`
 
 Recommendation lines now include forecast outcome fields:
 
@@ -200,7 +216,10 @@ Recommendation lines now include forecast outcome fields:
 
 For the latest run, the realized fields are usually `pending` because the 5-trading-day horizon has not elapsed. `forecast_end_date` is still populated as the planned horizon end date so Tableau can show the forecast window immediately. When `export-tableau` is run later with enough price history, the historical recommendation export recalculates realized horizon outcomes from the available adjusted-close data.
 
-`forecast_error` is populated only when a calibrated expected return exists. The current ML model exports an uncalibrated `forecast_score`, so Tableau should treat it as a ranking/optimization score, not as a predicted percentage return.
+`forecast_error` is populated only when a calibrated expected return exists. When
+`calibration_status = calibrated`, Tableau can format `calibrated_expected_return` as the expected
+5-trading-day percentage return. Otherwise, Tableau should treat `forecast_score` as a
+ranking/optimization score, not as a predicted percentage return.
 
 For Supabase-backed accounts, `export-tableau` also emits account-level history tables when credentials are available:
 
@@ -211,7 +230,12 @@ For Supabase-backed accounts, `export-tableau` also emits account-level history 
 - `recommendation_lines_history`
 - `performance_snapshots_history`
 
-Use `recommendation_lines_history` for Tableau views that need recommendation history by ticker, action, model version, run date, forecast score, realized return, active return versus SPY, and hit/miss status. Use the single-run `recommendation_lines` table only for the current run. Empty history tables are still emitted with stable column names so Tableau extracts do not change shape across refreshes.
+Use `recommendation_lines_history` for Tableau views that need recommendation history by ticker,
+action, model version, run date, forecast score, calibrated expected return, realized return, active
+return versus SPY, and hit/miss status. Use `recommendation_runs_history` for calibration
+diagnostics by run. Use the single-run `recommendation_lines` table only for the current run. Empty
+history tables are still emitted with stable column names so Tableau extracts do not change shape
+across refreshes.
 
 `performance_snapshots` uses actual imported portfolio snapshots as valuation points. If you want return tracking to be meaningful, import a fresh snapshot after market close before running the recommendation flow. Cashflows after the latest snapshot are still used for recommendations, but they are not a substitute for an updated valuation snapshot. Performance rows include `initial_value`, `total_deposits`, `invested_capital`, and `return_on_invested_capital` so Tableau can distinguish the starting account value from later deposits.
 
@@ -219,6 +243,8 @@ Use `recommendation_lines_history` for Tableau views that need recommendation hi
 
 Supabase is the source for accounts, cashflows, portfolio snapshots, and holdings, and it stores live recommendation and performance history after each successful live run.
 
-The generated Hyper extract contains `portfolio_dashboard_mart` plus account tracking tables when they exist for the run. CSV and Parquet mirrors remain available under `data/runs/<run_id>/gold/`.
+The generated Hyper extract contains `portfolio_dashboard_mart`, calibration diagnostics tables,
+and account tracking tables when they exist for the run. CSV and Parquet mirrors remain available
+under `data/runs/<run_id>/gold/`.
 
 Snapshot import inserts the portfolio snapshot and holding rows in separate Supabase calls, with compensating cleanup if holding insertion fails. If both holding insertion and cleanup fail, inspect the snapshot before using it for live recommendations.

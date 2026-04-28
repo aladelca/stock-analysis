@@ -169,7 +169,18 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
             model_version="e8-scale-0p5-contribution-aware-v1",
             ml_score_scale=0.5,
             config_hash="abc123",
-            expected_return_is_calibrated=False,
+            expected_return_is_calibrated=True,
+            optimizer_return_unit="5d_return",
+            calibration_enabled=True,
+            calibration_method="isotonic",
+            calibration_target="fwd_return_5d",
+            calibration_model_version="lightgbm_return_zscore:isotonic",
+            calibration_status="calibrated",
+            calibration_trained_through_date=date(2026, 4, 23),
+            calibration_observations=250,
+            calibration_mae=0.015,
+            calibration_rmse=0.02,
+            calibration_rank_ic=0.12,
         )
     )
     lines = repo.insert_recommendation_lines(
@@ -202,7 +213,14 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
     )
 
     assert run.id == "recommendation_runs-1"
-    assert run.expected_return_is_calibrated is False
+    assert run.expected_return_is_calibrated is True
+    assert run.optimizer_return_unit == "5d_return"
+    assert run.calibration_enabled is True
+    assert run.calibration_status == "calibrated"
+    assert run.calibration_trained_through_date == date(2026, 4, 23)
+    assert run.calibration_observations == 250
+    assert run.calibration_mae == pytest.approx(0.015)
+    assert client.tables["recommendation_runs"][0]["calibration_method"] == "isotonic"
     assert lines[0].id == "recommendation_lines-1"
     assert lines[0].forecast_score == pytest.approx(0.2)
     assert lines[0].forecast_horizon_days == 5

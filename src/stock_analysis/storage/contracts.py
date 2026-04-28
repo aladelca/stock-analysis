@@ -73,6 +73,17 @@ class RecommendationRunRecord:
     ml_score_scale: float
     config_hash: str
     expected_return_is_calibrated: bool = False
+    optimizer_return_unit: str | None = None
+    calibration_enabled: bool = False
+    calibration_method: str | None = None
+    calibration_target: str | None = None
+    calibration_model_version: str | None = None
+    calibration_status: str | None = None
+    calibration_trained_through_date: date | None = None
+    calibration_observations: int | None = None
+    calibration_mae: float | None = None
+    calibration_rmse: float | None = None
+    calibration_rank_ic: float | None = None
     status: str = "completed"
     id: str | None = None
 

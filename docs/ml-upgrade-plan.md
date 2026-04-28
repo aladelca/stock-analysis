@@ -333,7 +333,9 @@ Only run if Phase 2 produces a clear winner over the heuristic. Otherwise the DL
 - The live ML path uses the Phase 2 E8 Ridge + LightGBM regression blend, retrained on available labels at run time and inferred only on the latest cross-section.
 - The production optimizer uses the selected SPY-relative configuration: top 100 assets by latest `dollar_volume_21d` and `optimizer.max_weight: 0.30`.
 - `run_metadata` records `forecast_engine`, `model_version`, `model_family`, and `expected_return_is_calibrated`.
-- The ML score remains uncalibrated; `expected_return` is the optimizer-facing forecast score, not a calibrated return estimate.
+- Update 2026-04-28: the live ML path can now calibrate `forecast_score` into a 5-trading-day
+  `calibrated_expected_return` when the calibration gate passes. If the gate fails,
+  `forecast_score` remains a ranking signal.
 
 ### Phase 4 exit criteria
 

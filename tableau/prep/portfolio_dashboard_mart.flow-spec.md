@@ -13,6 +13,9 @@ Current-run inputs:
 - `portfolio_risk_metrics.csv` keyed by `run_id`
 - `sector_exposure.csv` keyed by `run_id`, `gics_sector`
 - `run_metadata.csv` keyed by `run_id`
+- `forecast_calibration_diagnostics.csv` keyed by run, if you want calibration QA views
+- `forecast_calibration_predictions.csv` keyed by calibration validation date and ticker, if you
+  want score-vs-realized validation views
 
 Live account history inputs, when Supabase-backed account tracking is enabled:
 
@@ -42,6 +45,12 @@ Live account history inputs, when Supabase-backed account tracking is enabled:
    - `run_created_at_utc`
    - `run_config_hash`
    - `run_config_hash_short`
+   - `run_optimizer_return_unit`
+   - `run_calibration_status`
+   - `run_calibration_observations`
+   - `run_calibration_mae`
+   - `run_calibration_rmse`
+   - `run_calibration_rank_ic`
 7. Join sector exposure by `gics_sector`.
 8. Add calculated fields:
    - `current_weight = IFNULL([current_weight], 0)`
@@ -142,6 +151,17 @@ one row per recommendation ticker per run
 - `run_config_hash`
 - `run_config_hash_short`
 - `run_expected_return_is_calibrated`
+- `run_optimizer_return_unit`
+- `run_calibration_enabled`
+- `run_calibration_method`
+- `run_calibration_target`
+- `run_calibration_model_version`
+- `run_calibration_status`
+- `run_calibration_trained_through_date`
+- `run_calibration_observations`
+- `run_calibration_mae`
+- `run_calibration_rmse`
+- `run_calibration_rank_ic`
 
 ## History Dashboard Tables
 
@@ -151,7 +171,8 @@ Use these table grains in Tableau:
   recommendation history, action history, forecast score trend, realized return, active return
   versus SPY, forecast error, directional hit, and `outcome_status`.
 - `recommendation_runs_history`: one row per run. Relate it to
-  `recommendation_lines_history.recommendation_run_id = recommendation_runs_history.id`.
+  `recommendation_lines_history.recommendation_run_id = recommendation_runs_history.id`. Use this
+  for run-level calibration status, observation count, MAE, RMSE, and rank IC.
 - `performance_snapshots_history`: one row per account valuation date. Use this for account value,
   initial value, total deposits, invested capital, return on invested capital, account TWR/MWR,
   SPY same-cashflow value, and active return.
@@ -170,6 +191,6 @@ Use these table grains in Tableau:
   config.
 - No selected asset has a negative weight.
 - No selected asset exceeds the configured max weight, allowing solver tolerance.
-- The Python-generated live-account Hyper contains `portfolio_dashboard_mart` plus current-run
-  account tables and `_history` tables. The no-live-account Hyper contains only
-  `portfolio_dashboard_mart`.
+- The Python-generated live-account Hyper contains `portfolio_dashboard_mart`, calibration
+  diagnostics tables, current-run account tables, and `_history` tables. The no-live-account Hyper
+  contains `portfolio_dashboard_mart` plus calibration diagnostics tables.

@@ -24,6 +24,8 @@ TABLEAU_CSV_TABLES: tuple[tuple[str, str], ...] = (
     ("gold", "run_metadata"),
 )
 TABLEAU_OPTIONAL_CSV_TABLES: tuple[tuple[str, str], ...] = (
+    ("gold", "forecast_calibration_diagnostics"),
+    ("gold", "forecast_calibration_predictions"),
     ("gold", "cashflows"),
     ("gold", "portfolio_snapshots"),
     ("gold", "holding_snapshots"),

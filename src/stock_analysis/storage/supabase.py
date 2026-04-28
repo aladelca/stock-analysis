@@ -396,6 +396,19 @@ def _recommendation_run_from_row(row: Mapping[str, Any]) -> RecommendationRunRec
         config_hash=str(row["config_hash"]),
         expected_return_is_calibrated=_optional_bool(row.get("expected_return_is_calibrated"))
         or False,
+        optimizer_return_unit=_optional_str(row.get("optimizer_return_unit")),
+        calibration_enabled=_optional_bool(row.get("calibration_enabled")) or False,
+        calibration_method=_optional_str(row.get("calibration_method")),
+        calibration_target=_optional_str(row.get("calibration_target")),
+        calibration_model_version=_optional_str(row.get("calibration_model_version")),
+        calibration_status=_optional_str(row.get("calibration_status")),
+        calibration_trained_through_date=_optional_date(
+            row.get("calibration_trained_through_date")
+        ),
+        calibration_observations=_optional_int(row.get("calibration_observations")),
+        calibration_mae=_optional_float(row.get("calibration_mae")),
+        calibration_rmse=_optional_float(row.get("calibration_rmse")),
+        calibration_rank_ic=_optional_float(row.get("calibration_rank_ic")),
         status=str(row.get("status") or "completed"),
     )
 

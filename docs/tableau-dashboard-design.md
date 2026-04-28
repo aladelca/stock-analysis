@@ -81,7 +81,8 @@ Use a single dashboard, fixed at `1280 x 850` for the generated base workbook.
 ## Design Principles
 
 - Use one screen. Avoid tabs until there is historical data.
-- Treat `forecast_score` as a model score, not a guaranteed expected return.
+- Treat `forecast_score` as a ranking signal. Treat `calibrated_expected_return` as an expected
+  5-trading-day return only when `expected_return_is_calibrated = true`.
 - Make concentration visible. The treemap should make dominant sectors obvious.
 - Keep selected and excluded assets in the same scatter so the recommendation context is visible.
 - Use the footer to make run freshness auditable.
@@ -124,7 +125,8 @@ Displayed measures:
 
 - `target_weight` as a horizontal bar.
 - `target_weight_label` as text.
-- `forecast_score`, formatted to two decimals.
+- `forecast_score`, formatted to two decimals, plus calibrated expected return in percent when
+  available.
 - `volatility`, formatted to two decimals.
 - `action`.
 - `reason_code` in tooltip.
@@ -239,7 +241,9 @@ For holdings and scatter marks, include:
 - Current holdings must be supplied for true sell/hold semantics. Without a holdings file, the run
   is first-allocation mode and most selected assets appear as BUY.
 - EXCLUDE means no current position and no target allocation.
-- `forecast_score` is heuristic and should not be labeled as a guaranteed expected return.
+- `forecast_score` should not be labeled as a predicted percentage return. Use
+  `calibrated_expected_return` for expected-return labels only when the run calibration status is
+  `calibrated`.
 - No time-series chart should be added until multi-run history is intentionally modeled.
 
 ## Future Enhancements

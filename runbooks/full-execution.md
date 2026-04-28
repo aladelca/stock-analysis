@@ -251,6 +251,8 @@ data/runs/$RUN_ID/silver/asset_daily_features.parquet
 data/runs/$RUN_ID/silver/asset_universe_snapshot.parquet
 data/runs/$RUN_ID/gold/optimizer_input.parquet
 data/runs/$RUN_ID/gold/covariance_matrix.parquet
+data/runs/$RUN_ID/gold/forecast_calibration_diagnostics.parquet
+data/runs/$RUN_ID/gold/forecast_calibration_predictions.parquet
 data/runs/$RUN_ID/gold/portfolio_recommendations.parquet
 data/runs/$RUN_ID/gold/portfolio_risk_metrics.parquet
 data/runs/$RUN_ID/gold/sector_exposure.parquet
@@ -263,8 +265,9 @@ and `portfolio_dashboard_mart` include forecast horizon outcome columns such as
 `forecast_score`, `expected_return_is_calibrated`, `calibrated_expected_return`,
 `forecast_horizon_days`, `forecast_start_date`, `forecast_end_date`, `realized_return`,
 `realized_spy_return`, `realized_active_return`, `forecast_error`, `forecast_hit`, and
-`outcome_status`. `forecast_error` is populated only for calibrated return forecasts; the
-current ML model's uncalibrated `forecast_score` should be visualized as a score/ranking signal.
+`outcome_status`. `forecast_error` is populated only for calibrated return forecasts. When
+`run_metadata.calibration_status = calibrated`, `calibrated_expected_return` and `expected_return`
+are 5-trading-day return estimates; otherwise, use `forecast_score` only as a ranking signal.
 
 For historical Tableau dashboards, run `export-tableau` after the one-shot run. When
 `live_account.enabled=true` and Supabase credentials are available, the export adds full-account
@@ -399,6 +402,11 @@ forecast:
   ml_horizon_days: 5
   ml_max_assets: 100
   ml_score_scale: 1.0
+  ml_calibration_enabled: true
+  ml_calibration_min_observations: 200
+  ml_calibration_splits: 5
+  ml_calibration_embargo_days: 15
+  ml_calibration_shrinkage: 0.25
 
 optimizer:
   max_weight: 0.24
@@ -425,7 +433,9 @@ Expected Hyper file:
 data/runs/$RUN_ID/gold/tableau_dashboard_mart.hyper
 ```
 
-This Hyper extract contains `portfolio_dashboard_mart`. With live account tracking enabled, it also includes the account tracking tables for cashflows, snapshots, recommendation history, and performance history.
+This Hyper extract contains `portfolio_dashboard_mart`, `forecast_calibration_diagnostics`, and
+`forecast_calibration_predictions`. With live account tracking enabled, it also includes the
+account tracking tables for cashflows, snapshots, recommendation history, and performance history.
 
 ## 12. Tableau Prep Transformation
 

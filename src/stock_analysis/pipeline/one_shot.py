@@ -16,7 +16,11 @@ from stock_analysis.env import load_local_env
 from stock_analysis.features.panel import compute_asset_feature_panel
 from stock_analysis.features.price_features import compute_asset_daily_features
 from stock_analysis.forecasting.baseline import build_optimizer_inputs
-from stock_analysis.forecasting.ml_forecast import build_ml_optimizer_inputs
+from stock_analysis.forecasting.calibration import (
+    disabled_calibration_diagnostics,
+    empty_calibration_predictions,
+)
+from stock_analysis.forecasting.ml_forecast import build_ml_optimizer_inputs_with_artifacts
 from stock_analysis.forecasting.outcomes import attach_forecast_outcomes
 from stock_analysis.ingestion.prices import PriceDownload, PriceProvider, YFinancePriceProvider
 from stock_analysis.ingestion.raw_store import write_json, write_text
@@ -172,18 +176,26 @@ def run_one_shot(
     features = compute_asset_daily_features(asset_daily_prices, constituents, config.features)
     write_silver_table(features, "asset_daily_features", paths)
 
+    calibration_predictions = empty_calibration_predictions()
+    calibration_diagnostics = _calibration_diagnostics_disabled(config)
     if config.forecast.engine == "ml":
-        optimizer_input, covariance = build_ml_optimizer_inputs(
+        ml_result = build_ml_optimizer_inputs_with_artifacts(
             feature_panel,
             labels_panel,
             returns,
             config.forecast,
         )
+        optimizer_input = ml_result.optimizer_input
+        covariance = ml_result.covariance
+        calibration_predictions = ml_result.calibration_predictions
+        calibration_diagnostics = ml_result.calibration_diagnostics
     else:
         optimizer_input, covariance = build_optimizer_inputs(features, returns, config.forecast)
     write_parquet(optimizer_input, paths.gold_path("optimizer_input"))
     write_csv(optimizer_input, paths.csv_mirror_path("gold", "optimizer_input"))
     covariance.to_parquet(paths.gold_path("covariance_matrix"))
+    _write_gold_with_csv(paths, "forecast_calibration_diagnostics", calibration_diagnostics)
+    _write_gold_with_csv(paths, "forecast_calibration_predictions", calibration_predictions)
 
     portfolio_state, contribution_amount, live_state, live_repository = _load_rebalance_state(
         config,
@@ -244,6 +256,7 @@ def run_one_shot(
         data_as_of_date,
         constituents,
         daily_prices,
+        calibration_diagnostics=calibration_diagnostics,
         live_state=live_state,
     )
 
@@ -283,6 +296,10 @@ def run_one_shot(
         paths.csv_mirror_path("gold", "run_metadata"),
         paths.gold_path("optimizer_input"),
         paths.gold_path("covariance_matrix"),
+        paths.gold_path("forecast_calibration_diagnostics"),
+        paths.csv_mirror_path("gold", "forecast_calibration_diagnostics"),
+        paths.gold_path("forecast_calibration_predictions"),
+        paths.csv_mirror_path("gold", "forecast_calibration_predictions"),
     ]
     for name in account_tracking_tables:
         artifact_paths.extend(
@@ -303,6 +320,8 @@ def run_one_shot(
         )
         hyper_tables = {
             "portfolio_dashboard_mart": dashboard_mart,
+            "forecast_calibration_diagnostics": calibration_diagnostics,
+            "forecast_calibration_predictions": calibration_predictions,
             **account_tracking_tables,
         }
         exported = export_hyper_if_available(
@@ -495,6 +514,19 @@ def _persist_account_tracking_outputs(
                 metadata.get("expected_return_is_calibrated")
             )
             or False,
+            optimizer_return_unit=_optional_str(metadata.get("optimizer_return_unit")),
+            calibration_enabled=_optional_bool(metadata.get("calibration_enabled")) or False,
+            calibration_method=_optional_str(metadata.get("calibration_method")),
+            calibration_target=_optional_str(metadata.get("calibration_target")),
+            calibration_model_version=_optional_str(metadata.get("calibration_model_version")),
+            calibration_status=_optional_str(metadata.get("calibration_status")),
+            calibration_trained_through_date=_optional_date(
+                metadata.get("calibration_trained_through_date")
+            ),
+            calibration_observations=_optional_int(metadata.get("calibration_observations")),
+            calibration_mae=_optional_float(metadata.get("calibration_mae")),
+            calibration_rmse=_optional_float(metadata.get("calibration_rmse")),
+            calibration_rank_ic=_optional_float(metadata.get("calibration_rank_ic")),
         )
     )
     if recommendation_run.id is None:
@@ -636,7 +668,7 @@ def _optional_bool(value: object) -> bool | None:
 
 
 def _is_missing(value: object) -> bool:
-    if value is None:
+    if value is None or value == "":
         return True
     try:
         return bool(pd.isna(cast(Any, value)))
@@ -660,6 +692,14 @@ def _rebalance_context_tickers(
     return pd.Index(list(dict.fromkeys(tickers)), name="ticker")
 
 
+def _calibration_diagnostics_disabled(config: PortfolioConfig) -> pd.DataFrame:
+    return disabled_calibration_diagnostics(
+        method=config.forecast.ml_calibration_method,
+        target_column="",
+        horizon_days=config.forecast.ml_horizon_days,
+    )
+
+
 def _build_run_metadata(
     config: PortfolioConfig,
     run_id: str,
@@ -668,10 +708,13 @@ def _build_run_metadata(
     constituents: pd.DataFrame,
     daily_prices: pd.DataFrame,
     *,
+    calibration_diagnostics: pd.DataFrame | None = None,
     live_state: LivePortfolioState | None = None,
 ) -> pd.DataFrame:
     config_json = config.model_dump_json(exclude={"run": {"as_of_date"}})
     config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
+    calibration = _calibration_context(calibration_diagnostics)
+    expected_return_is_calibrated = calibration.get("calibration_status") == "calibrated"
     payload = {
         "run_id": run_id,
         "requested_as_of_date": requested_as_of_date.isoformat(),
@@ -683,7 +726,24 @@ def _build_run_metadata(
             config.forecast.ml_model_version if config.forecast.engine == "ml" else "heuristic"
         ),
         "model_family": ("ridge_lightgbm_blend" if config.forecast.engine == "ml" else "heuristic"),
-        "expected_return_is_calibrated": False,
+        "expected_return_is_calibrated": expected_return_is_calibrated,
+        "optimizer_return_unit": (
+            f"{config.forecast.ml_horizon_days}d_return"
+            if expected_return_is_calibrated
+            else "score"
+        ),
+        "calibration_enabled": config.forecast.ml_calibration_enabled,
+        "calibration_method": calibration.get("calibration_method", ""),
+        "calibration_target": calibration.get("calibration_target", ""),
+        "calibration_model_version": (
+            f"{config.forecast.ml_model_version}:{calibration.get('calibration_method', '')}"
+        ),
+        "calibration_status": calibration.get("calibration_status", "disabled"),
+        "calibration_trained_through_date": calibration.get("calibration_trained_through_date", ""),
+        "calibration_observations": calibration.get("calibration_observations", 0),
+        "calibration_mae": calibration.get("calibration_mae"),
+        "calibration_rmse": calibration.get("calibration_rmse"),
+        "calibration_rank_ic": calibration.get("calibration_rank_ic"),
         "commission_rate": config.optimizer.commission_rate,
         "min_rebalance_trade_weight": config.optimizer.min_rebalance_trade_weight,
         "sector_max_weight": config.optimizer.sector_max_weight,
@@ -724,6 +784,12 @@ def _build_run_metadata(
         "config_json": json.dumps(config.model_dump(mode="json"), sort_keys=True),
     }
     return pd.DataFrame([payload])
+
+
+def _calibration_context(calibration_diagnostics: pd.DataFrame | None) -> dict[str, object]:
+    if calibration_diagnostics is None or calibration_diagnostics.empty:
+        return {}
+    return _string_keyed_row(calibration_diagnostics.iloc[0].to_dict())
 
 
 def _latest_price_date(daily_prices: pd.DataFrame) -> date:

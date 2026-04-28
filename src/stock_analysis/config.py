@@ -82,6 +82,15 @@ class ForecastConfig(BaseModel):
     ml_lightgbm_nested_cv: bool = False
     ml_lightgbm_inner_folds: int = Field(default=2, ge=1)
     ml_random_seed: int = 42
+    ml_calibration_enabled: bool = False
+    ml_calibration_method: Literal["isotonic"] = "isotonic"
+    ml_calibration_target: Literal["return"] = "return"
+    ml_calibration_min_observations: int = Field(default=200, ge=10)
+    ml_calibration_lookback_days: int | None = Field(default=None, ge=30)
+    ml_calibration_splits: int = Field(default=5, ge=2)
+    ml_calibration_embargo_days: int = Field(default=15, ge=0)
+    ml_calibration_shrinkage: float = Field(default=0.25, ge=0, le=1)
+    ml_use_calibrated_expected_return: bool = True
 
     @field_validator("label_horizons")
     @classmethod
