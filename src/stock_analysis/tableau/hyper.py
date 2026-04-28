@@ -58,13 +58,15 @@ def export_hyper_if_available(
 def _sql_type_for_series(series: pd.Series):
     from tableauhyperapi import SqlType
 
+    non_null = series.dropna()
     if pd.api.types.is_integer_dtype(series):
         return SqlType.big_int()
     if pd.api.types.is_float_dtype(series):
         return SqlType.double()
     if pd.api.types.is_bool_dtype(series):
         return SqlType.bool()
-    non_null = series.dropna()
+    if not non_null.empty and non_null.map(lambda value: isinstance(value, bool)).all():
+        return SqlType.bool()
     if not non_null.empty and non_null.map(lambda value: isinstance(value, date)).all():
         return SqlType.date()
     return SqlType.text()
