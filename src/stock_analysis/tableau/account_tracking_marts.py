@@ -291,7 +291,11 @@ def _same_cashflow_spy_benchmark(
         spy["date"].dt.date <= as_of_date
     )
     spy = spy.loc[mask].sort_values("date")
-    cashflow_by_date = _cashflow_amount_by_date(cashflows)
+    cashflow_by_date = _cashflow_amount_by_trading_date(
+        cashflows,
+        trading_dates=[pd.Timestamp(value).date() for value in spy["date"]],
+        as_of_date=as_of_date,
+    )
     investor_cashflows = [(first_snapshot.snapshot_date, -value)]
     twr_returns: list[float] = []
     for _, row in spy.iterrows():
@@ -329,13 +333,27 @@ def _net_cashflow_between(
     )
 
 
-def _cashflow_amount_by_date(cashflows: list[CashflowRecord]) -> dict[date, float]:
+def _cashflow_amount_by_trading_date(
+    cashflows: list[CashflowRecord],
+    *,
+    trading_dates: list[date],
+    as_of_date: date,
+) -> dict[date, float]:
     result: dict[date, float] = {}
+    sorted_trading_dates = sorted(set(trading_dates))
     for cashflow in cashflows:
-        result[cashflow.cashflow_date] = result.get(cashflow.cashflow_date, 0.0) + float(
-            cashflow.amount
-        )
+        mapped_date = _next_trading_date(cashflow.cashflow_date, sorted_trading_dates)
+        if mapped_date is None or mapped_date > as_of_date:
+            continue
+        result[mapped_date] = result.get(mapped_date, 0.0) + float(cashflow.amount)
     return result
+
+
+def _next_trading_date(cashflow_date: date, trading_dates: list[date]) -> date | None:
+    for trading_date in trading_dates:
+        if trading_date >= cashflow_date:
+            return trading_date
+    return None
 
 
 def _total_deposits(cashflows: list[CashflowRecord]) -> float:

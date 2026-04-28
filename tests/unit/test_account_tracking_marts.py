@@ -45,6 +45,19 @@ def test_account_tracking_marts_include_cashflows_performance_and_recommendation
     assert performance.loc["2026-01-10", "spy_same_cashflow_value"] > 1000.0
 
 
+def test_spy_same_cashflow_benchmark_maps_weekend_cashflows_to_next_trading_day() -> None:
+    tables = build_account_tracking_marts(
+        live_state=_live_state(first_cashflow_date=date(2026, 1, 3)),
+        recommendations=_recommendations(),
+        run_metadata=_run_metadata(),
+        spy_daily=_spy_daily(),
+        commission_rate=0.0,
+    )
+
+    performance = tables["performance_snapshots"].set_index("as_of_date")
+    assert performance.loc["2026-01-10", "spy_same_cashflow_value"] == pytest.approx(1133.3311)
+
+
 def test_dashboard_mart_exposes_latest_account_performance_fields() -> None:
     tables = build_account_tracking_marts(
         live_state=_live_state(),
@@ -67,7 +80,7 @@ def test_dashboard_mart_exposes_latest_account_performance_fields() -> None:
     assert mart["run_live_cashflow_source"].iat[0] == "actual"
 
 
-def _live_state() -> LivePortfolioState:
+def _live_state(*, first_cashflow_date: date = date(2026, 1, 5)) -> LivePortfolioState:
     account = AccountRecord(
         id="account-1",
         slug="main",
@@ -96,7 +109,7 @@ def _live_state() -> LivePortfolioState:
         CashflowRecord(
             id="cashflow-1",
             account_id="account-1",
-            cashflow_date=date(2026, 1, 5),
+            cashflow_date=first_cashflow_date,
             amount=100.0,
             cashflow_type="deposit",
             included_in_snapshot_id="snapshot-2",

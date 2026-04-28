@@ -70,6 +70,18 @@ def test_live_state_requires_fresh_snapshot_after_negative_net_cashflow() -> Non
         )
 
 
+def test_live_state_requires_holdings_for_positive_market_value_snapshot() -> None:
+    repository = FakeLiveRepository(cashflows=[])
+    repository.holdings = []
+
+    with pytest.raises(ValueError, match="holding rows"):
+        build_live_portfolio_state(
+            repository,
+            AccountRecord(id="account-1", slug="main", display_name="Main"),
+            as_of_date=date(2026, 4, 25),
+        )
+
+
 class FakeLiveRepository:
     def __init__(self, *, cashflows: list[CashflowRecord]) -> None:
         self.cashflows = cashflows

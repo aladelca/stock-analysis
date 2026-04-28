@@ -70,6 +70,12 @@ def build_live_portfolio_state(
         raise ValueError(msg)
 
     holdings = repository.list_holding_snapshots(snapshot.id)
+    if not holdings and snapshot.market_value > 0:
+        msg = (
+            "Live recommendations require holding rows when a snapshot has positive market_value. "
+            "Import ticker-level holdings or set market_value to 0 for an all-cash account."
+        )
+        raise ValueError(msg)
     market_values = pd.Series(
         {holding.ticker: float(holding.market_value) for holding in holdings},
         dtype=float,
