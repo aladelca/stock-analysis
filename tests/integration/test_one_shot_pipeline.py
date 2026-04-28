@@ -150,6 +150,64 @@ def test_one_shot_pipeline_uses_actual_live_cashflows(
     assert "gold.performance_snapshots.csv" in exports
 
 
+def test_export_existing_run_for_tableau_includes_account_history(
+    sample_html,
+    sample_config,
+    static_price_provider,
+) -> None:
+    sample_config.live_account.enabled = True
+    sample_config.live_account.account_slug = "main"
+    sample_config.live_account.cashflow_source = "actual"
+    repository = FakeAccountTrackingRepository()
+    historical_run = RecommendationRunRecord(
+        id="historical-run-id",
+        account_id="account-1",
+        run_id="historical-run",
+        as_of_date=date(2026, 1, 2),
+        data_as_of_date=date(2026, 1, 2),
+        model_version="e8-scale-0p5-contribution-aware-v1",
+        ml_score_scale=0.5,
+        config_hash="old",
+    )
+    repository.recommendation_runs.append(historical_run)
+    repository.recommendation_lines.append(
+        RecommendationLineRecord(
+            id="historical-line-id",
+            recommendation_run_id=historical_run.id or "",
+            ticker="AAA",
+            action="BUY",
+            expected_return=0.01,
+            target_weight=0.2,
+        )
+    )
+    run_one_shot(
+        sample_config,
+        universe_html=sample_html,
+        price_provider=static_price_provider,
+        account_repository=repository,
+    )
+
+    outputs = export_existing_run_for_tableau(
+        sample_config,
+        "test-run",
+        account_repository=repository,
+    )
+
+    assert "gold.recommendation_lines_history.csv" in outputs
+    history = pd.read_parquet(
+        sample_config.run.output_root
+        / "runs"
+        / "test-run"
+        / "gold"
+        / "recommendation_lines_history.parquet"
+    )
+    assert set(history["run_id"]) == {"historical-run", "test-run"}
+    historical = history.loc[history["run_id"].eq("historical-run")].iloc[0]
+    assert historical["outcome_status"] == "realized"
+    assert historical["forecast_horizon_days"] == 5
+    assert pd.notna(historical["realized_return"])
+
+
 def test_export_existing_run_for_tableau_does_not_rerun_pipeline(
     sample_html,
     sample_config,
@@ -379,6 +437,41 @@ class FakeAccountTrackingRepository:
         )
         self.performance_snapshots.append(persisted)
         return persisted
+
+    def list_recommendation_runs(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[RecommendationRunRecord]:
+        rows = [row for row in self.recommendation_runs if row.account_id == account_id]
+        if start_date is not None:
+            rows = [row for row in rows if row.data_as_of_date >= start_date]
+        if end_date is not None:
+            rows = [row for row in rows if row.data_as_of_date <= end_date]
+        return sorted(rows, key=lambda row: row.data_as_of_date)
+
+    def list_recommendation_lines(
+        self,
+        recommendation_run_ids: list[str],
+    ) -> list[RecommendationLineRecord]:
+        wanted = set(recommendation_run_ids)
+        return [row for row in self.recommendation_lines if row.recommendation_run_id in wanted]
+
+    def list_performance_snapshots(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[PerformanceSnapshotRecord]:
+        rows = [row for row in self.performance_snapshots if row.account_id == account_id]
+        if start_date is not None:
+            rows = [row for row in rows if row.as_of_date >= start_date]
+        if end_date is not None:
+            rows = [row for row in rows if row.as_of_date <= end_date]
+        return sorted(rows, key=lambda row: row.as_of_date)
 
 
 class _LongStaticPriceProvider:

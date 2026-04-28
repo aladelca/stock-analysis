@@ -17,6 +17,7 @@ from stock_analysis.features.panel import compute_asset_feature_panel
 from stock_analysis.features.price_features import compute_asset_daily_features
 from stock_analysis.forecasting.baseline import build_optimizer_inputs
 from stock_analysis.forecasting.ml_forecast import build_ml_optimizer_inputs
+from stock_analysis.forecasting.outcomes import attach_forecast_outcomes
 from stock_analysis.ingestion.prices import PriceDownload, PriceProvider, YFinancePriceProvider
 from stock_analysis.ingestion.raw_store import write_json, write_text
 from stock_analysis.ingestion.universe import fetch_sp500_html, parse_sp500_constituents
@@ -203,6 +204,13 @@ def run_one_shot(
         current_weights=current_weights,
         rebalance_context=rebalance_context,
         no_trade_band=config.execution.no_trade_band,
+    )
+    recommendations = attach_forecast_outcomes(
+        recommendations,
+        daily_prices,
+        horizon_days=config.forecast.ml_horizon_days,
+        run_data_as_of_date=data_as_of_date,
+        benchmark_ticker=config.prices.benchmark_tickers[0],
     )
     risk_metrics = build_risk_metrics(
         optimizer_input,
@@ -461,6 +469,15 @@ def _recommendation_line_record(
         reason_code=_optional_str(row.get("reason_code")),
         expected_return=_optional_float(row.get("expected_return")),
         volatility=_optional_float(row.get("volatility")),
+        forecast_horizon_days=_optional_int(row.get("forecast_horizon_days")),
+        forecast_start_date=_optional_date(row.get("forecast_start_date")),
+        forecast_end_date=_optional_date(row.get("forecast_end_date")),
+        realized_return=_optional_float(row.get("realized_return")),
+        realized_spy_return=_optional_float(row.get("realized_spy_return")),
+        realized_active_return=_optional_float(row.get("realized_active_return")),
+        forecast_error=_optional_float(row.get("forecast_error")),
+        forecast_hit=_optional_bool(row.get("forecast_hit")),
+        outcome_status=_optional_str(row.get("outcome_status")),
     )
 
 
@@ -468,6 +485,14 @@ def _date_field(value: object, field_name: str) -> date:
     if _is_missing(value):
         msg = f"Missing required account tracking date field: {field_name}"
         raise ValueError(msg)
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def _optional_date(value: object) -> date | None:
+    if _is_missing(value):
+        return None
     if isinstance(value, date):
         return value
     return date.fromisoformat(str(value)[:10])
@@ -500,6 +525,22 @@ def _optional_float(value: object) -> float | None:
     if _is_missing(value):
         return None
     return float(cast(Any, value))
+
+
+def _optional_int(value: object) -> int | None:
+    if _is_missing(value):
+        return None
+    return int(cast(Any, value))
+
+
+def _optional_bool(value: object) -> bool | None:
+    if _is_missing(value):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "t", "1", "yes", "y"}
+    return bool(value)
 
 
 def _is_missing(value: object) -> bool:

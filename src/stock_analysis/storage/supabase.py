@@ -217,6 +217,39 @@ class SupabaseAccountTrackingRepository:
         )
         return [_recommendation_line_from_row(row) for row in response.data or []]
 
+    def list_recommendation_runs(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[RecommendationRunRecord]:
+        query = (
+            self._table(self._config.recommendation_runs_table)
+            .select("*")
+            .eq("account_id", account_id)
+        )
+        if start_date is not None:
+            query = query.gte("data_as_of_date", start_date.isoformat())
+        if end_date is not None:
+            query = query.lte("data_as_of_date", end_date.isoformat())
+        response = _execute(query.order("data_as_of_date").order("created_at"))
+        return [_recommendation_run_from_row(row) for row in response.data or []]
+
+    def list_recommendation_lines(
+        self,
+        recommendation_run_ids: list[str],
+    ) -> list[RecommendationLineRecord]:
+        if not recommendation_run_ids:
+            return []
+        response = _execute(
+            self._table(self._config.recommendation_lines_table)
+            .select("*")
+            .in_("recommendation_run_id", recommendation_run_ids)
+            .order("ticker")
+        )
+        return [_recommendation_line_from_row(row) for row in response.data or []]
+
     def insert_performance_snapshot(
         self,
         snapshot: PerformanceSnapshotRecord,
@@ -230,6 +263,25 @@ class SupabaseAccountTrackingRepository:
         return _performance_snapshot_from_row(
             _single_response_row(response, self._config.performance_snapshots_table)
         )
+
+    def list_performance_snapshots(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[PerformanceSnapshotRecord]:
+        query = (
+            self._table(self._config.performance_snapshots_table)
+            .select("*")
+            .eq("account_id", account_id)
+        )
+        if start_date is not None:
+            query = query.gte("as_of_date", start_date.isoformat())
+        if end_date is not None:
+            query = query.lte("as_of_date", end_date.isoformat())
+        response = _execute(query.order("as_of_date").order("created_at"))
+        return [_performance_snapshot_from_row(row) for row in response.data or []]
 
     def _table(self, name: str) -> Any:
         if self._config.schema_name == "public":
@@ -351,6 +403,15 @@ def _recommendation_line_from_row(row: Mapping[str, Any]) -> RecommendationLineR
         reason_code=_optional_str(row.get("reason_code")),
         expected_return=_optional_float(row.get("expected_return")),
         volatility=_optional_float(row.get("volatility")),
+        forecast_horizon_days=_optional_int(row.get("forecast_horizon_days")),
+        forecast_start_date=_optional_date(row.get("forecast_start_date")),
+        forecast_end_date=_optional_date(row.get("forecast_end_date")),
+        realized_return=_optional_float(row.get("realized_return")),
+        realized_spy_return=_optional_float(row.get("realized_spy_return")),
+        realized_active_return=_optional_float(row.get("realized_active_return")),
+        forecast_error=_optional_float(row.get("forecast_error")),
+        forecast_hit=_optional_bool(row.get("forecast_hit")),
+        outcome_status=_optional_str(row.get("outcome_status")),
     )
 
 
@@ -388,6 +449,22 @@ def _optional_float(value: object) -> float | None:
     if value in {None, ""}:
         return None
     return float(cast(Any, value))
+
+
+def _optional_int(value: object) -> int | None:
+    if value in {None, ""}:
+        return None
+    return int(cast(Any, value))
+
+
+def _optional_bool(value: object) -> bool | None:
+    if value in {None, ""}:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "t", "1", "yes", "y"}
+    return bool(value)
 
 
 def _optional_str(value: object) -> str | None:

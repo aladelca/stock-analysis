@@ -95,6 +95,15 @@ class RecommendationLineRecord:
     reason_code: str | None = None
     expected_return: float | None = None
     volatility: float | None = None
+    forecast_horizon_days: int | None = None
+    forecast_start_date: date | None = None
+    forecast_end_date: date | None = None
+    realized_return: float | None = None
+    realized_spy_return: float | None = None
+    realized_active_return: float | None = None
+    forecast_error: float | None = None
+    forecast_hit: bool | None = None
+    outcome_status: str | None = None
     id: str | None = None
 
 
@@ -162,7 +171,28 @@ class AccountTrackingRepository(Protocol):
         lines: list[RecommendationLineRecord],
     ) -> list[RecommendationLineRecord]: ...
 
+    def list_recommendation_runs(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[RecommendationRunRecord]: ...
+
+    def list_recommendation_lines(
+        self,
+        recommendation_run_ids: list[str],
+    ) -> list[RecommendationLineRecord]: ...
+
     def insert_performance_snapshot(
         self,
         snapshot: PerformanceSnapshotRecord,
     ) -> PerformanceSnapshotRecord: ...
+
+    def list_performance_snapshots(
+        self,
+        account_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[PerformanceSnapshotRecord]: ...

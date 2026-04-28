@@ -179,6 +179,31 @@ CSV mirrors are written under `data/runs/<run_id>/gold/csv/`. `export-tableau` a
 
 For live account runs, `recommendation_runs`, `recommendation_lines`, and `performance_snapshots` are also persisted back to Supabase after the local gold artifacts are written.
 
+Recommendation lines now include forecast outcome fields:
+
+- `forecast_horizon_days`
+- `forecast_start_date`
+- `forecast_end_date`
+- `realized_return`
+- `realized_spy_return`
+- `realized_active_return`
+- `forecast_error`
+- `forecast_hit`
+- `outcome_status`
+
+For the latest run, these fields are usually `pending` because the 5-trading-day horizon has not elapsed. When `export-tableau` is run later with enough price history, the historical recommendation export recalculates realized horizon outcomes from the available adjusted-close data.
+
+For Supabase-backed accounts, `export-tableau` also emits account-level history tables when credentials are available:
+
+- `cashflows_history`
+- `portfolio_snapshots_history`
+- `holding_snapshots_history`
+- `recommendation_runs_history`
+- `recommendation_lines_history`
+- `performance_snapshots_history`
+
+Use `recommendation_lines_history` for Tableau views that need recommendation history by ticker, action, model version, run date, forecast score, realized return, active return versus SPY, and hit/miss status. Use the single-run `recommendation_lines` table only for the current run.
+
 `performance_snapshots` uses actual imported portfolio snapshots as valuation points. If you want return tracking to be meaningful, import a fresh snapshot after market close before running the recommendation flow. Cashflows after the latest snapshot are still used for recommendations, but they are not a substitute for an updated valuation snapshot.
 
 ## Operational Notes

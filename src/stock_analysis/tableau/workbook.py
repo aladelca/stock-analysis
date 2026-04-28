@@ -63,6 +63,31 @@ FIELDS: dict[str, TableauField] = {
     "forecast_score": TableauField(
         "forecast_score", "real", "measure", "quantitative", "Forecast Score"
     ),
+    "forecast_horizon_days": TableauField(
+        "forecast_horizon_days", "integer", "dimension", "nominal", "Forecast Horizon Days"
+    ),
+    "forecast_start_date": TableauField(
+        "forecast_start_date", "date", "dimension", "nominal", "Forecast Start Date"
+    ),
+    "forecast_end_date": TableauField(
+        "forecast_end_date", "date", "dimension", "nominal", "Forecast End Date"
+    ),
+    "realized_return": TableauField(
+        "realized_return", "real", "measure", "quantitative", "Realized Return"
+    ),
+    "realized_spy_return": TableauField(
+        "realized_spy_return", "real", "measure", "quantitative", "Realized SPY Return"
+    ),
+    "realized_active_return": TableauField(
+        "realized_active_return", "real", "measure", "quantitative", "Realized Active Return"
+    ),
+    "forecast_error": TableauField(
+        "forecast_error", "real", "measure", "quantitative", "Forecast Error"
+    ),
+    "forecast_hit": TableauField("forecast_hit", "boolean", "dimension", "nominal", "Forecast Hit"),
+    "outcome_status": TableauField(
+        "outcome_status", "string", "dimension", "nominal", "Outcome Status"
+    ),
     "volatility": TableauField("volatility", "real", "measure", "quantitative", "Volatility"),
     "target_weight": TableauField(
         "target_weight", "real", "measure", "quantitative", "Target Weight"

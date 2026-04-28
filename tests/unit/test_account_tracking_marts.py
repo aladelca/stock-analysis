@@ -38,6 +38,8 @@ def test_account_tracking_marts_include_cashflows_performance_and_recommendation
     assert tables["cashflows"]["is_applied_to_recommendation"].tolist() == [False, True]
     assert tables["recommendation_runs"]["unapplied_cashflow_amount"].iat[0] == pytest.approx(100.0)
     assert tables["recommendation_lines"]["recommendation_key"].iat[0] == "run-1:AAPL"
+    assert tables["recommendation_lines"]["forecast_horizon_days"].iat[0] == 5
+    assert tables["recommendation_lines"]["outcome_status"].iat[0] == "pending"
 
     performance = tables["performance_snapshots"].set_index("as_of_date")
     assert performance.loc["2026-01-10", "total_deposits"] == pytest.approx(100.0)
@@ -155,6 +157,9 @@ def _recommendations() -> pd.DataFrame:
                 "security": "Apple",
                 "gics_sector": "Information Technology",
                 "expected_return": 0.02,
+                "forecast_horizon_days": 5,
+                "forecast_start_date": "2026-01-10",
+                "outcome_status": "pending",
                 "volatility": 0.2,
                 "current_weight": 0.9,
                 "target_weight": 0.5,

@@ -5,8 +5,13 @@ from pathlib import Path
 import pandas as pd
 
 from stock_analysis.config import PortfolioConfig
+from stock_analysis.env import load_local_env
 from stock_analysis.io.csv import write_csv
+from stock_analysis.io.parquet import write_parquet
 from stock_analysis.paths import ProjectPaths
+from stock_analysis.storage.contracts import AccountTrackingRepository
+from stock_analysis.storage.supabase import create_account_tracking_repository
+from stock_analysis.tableau.account_history_marts import build_account_history_marts
 from stock_analysis.tableau.dashboard_mart import build_dashboard_mart
 from stock_analysis.tableau.hyper import export_hyper_if_available
 
@@ -28,9 +33,17 @@ TABLEAU_OPTIONAL_CSV_TABLES: tuple[tuple[str, str], ...] = (
 )
 
 
-def export_existing_run_for_tableau(config: PortfolioConfig, run_id: str) -> dict[str, Path]:
+def export_existing_run_for_tableau(
+    config: PortfolioConfig,
+    run_id: str,
+    *,
+    account_repository: AccountTrackingRepository | None = None,
+) -> dict[str, Path]:
     paths = ProjectPaths(config.run.output_root, run_id)
     outputs: dict[str, Path] = {}
+    history_tables = _account_history_tables(config, paths, account_repository)
+    for name, table in history_tables.items():
+        outputs[f"gold.{name}.parquet"] = write_parquet(table, paths.gold_path(name))
 
     if config.tableau.export_csv:
         for layer, name in TABLEAU_CSV_TABLES:
@@ -49,6 +62,8 @@ def export_existing_run_for_tableau(config: PortfolioConfig, run_id: str) -> dic
                     pd.read_parquet(parquet_path),
                     paths.csv_mirror_path(layer, name),
                 )
+        for name, table in history_tables.items():
+            outputs[f"gold.{name}.csv"] = write_csv(table, paths.csv_mirror_path("gold", name))
 
     if config.tableau.export_hyper:
         performance_snapshots = _read_optional_gold_table(paths, "performance_snapshots")
@@ -63,6 +78,7 @@ def export_existing_run_for_tableau(config: PortfolioConfig, run_id: str) -> dic
         hyper_tables = {
             "portfolio_dashboard_mart": dashboard_mart,
             **optional_gold_tables,
+            **history_tables,
         }
         hyper_path = paths.gold_path("tableau_dashboard_mart", "hyper")
         exported = export_hyper_if_available(hyper_tables, hyper_path)
@@ -107,3 +123,29 @@ def _read_optional_gold_tables(paths: ProjectPaths) -> dict[str, pd.DataFrame]:
         if table is not None:
             tables[name] = table
     return tables
+
+
+def _account_history_tables(
+    config: PortfolioConfig,
+    paths: ProjectPaths,
+    account_repository: AccountTrackingRepository | None,
+) -> dict[str, pd.DataFrame]:
+    if not config.live_account.enabled or not config.live_account.account_slug:
+        return {}
+    repository = account_repository
+    if repository is None:
+        if not config.supabase.enabled:
+            return {}
+        load_local_env()
+        repository = create_account_tracking_repository(config.supabase)
+    daily_prices_path = paths.bronze_path("daily_prices")
+    daily_prices = (
+        pd.read_parquet(daily_prices_path) if daily_prices_path.exists() else pd.DataFrame()
+    )
+    return build_account_history_marts(
+        repository=repository,
+        account_slug=config.live_account.account_slug,
+        daily_prices=daily_prices,
+        default_horizon_days=config.forecast.ml_horizon_days,
+        benchmark_ticker=config.prices.benchmark_tickers[0],
+    )

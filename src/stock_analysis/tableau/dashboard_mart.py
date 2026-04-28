@@ -57,7 +57,13 @@ def build_dashboard_mart(
     mart["sector_target_weight"] = mart["gics_sector"].map(sector_weights).fillna(0.0)
     mart = _coerce_date_columns(
         mart,
-        ["as_of_date", "run_requested_as_of_date", "run_data_as_of_date"],
+        [
+            "as_of_date",
+            "forecast_start_date",
+            "forecast_end_date",
+            "run_requested_as_of_date",
+            "run_data_as_of_date",
+        ],
     )
 
     column_order = [
@@ -67,6 +73,15 @@ def build_dashboard_mart(
         "security",
         "gics_sector",
         "forecast_score",
+        "forecast_horizon_days",
+        "forecast_start_date",
+        "forecast_end_date",
+        "realized_return",
+        "realized_spy_return",
+        "realized_active_return",
+        "forecast_error",
+        "forecast_hit",
+        "outcome_status",
         "volatility",
         "current_weight",
         "current_weight_label",

@@ -178,6 +178,9 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
                 ticker="SPY",
                 target_weight=0.3,
                 action="BUY",
+                forecast_horizon_days=5,
+                forecast_start_date=date(2026, 4, 24),
+                outcome_status="pending",
             )
         ]
     )
@@ -194,8 +197,13 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
 
     assert run.id == "recommendation_runs-1"
     assert lines[0].id == "recommendation_lines-1"
+    assert lines[0].forecast_horizon_days == 5
+    assert lines[0].forecast_start_date == date(2026, 4, 24)
+    assert repo.list_recommendation_runs("account-1") == [run]
+    assert repo.list_recommendation_lines([run.id or ""]) == lines
     assert performance.id == "performance_snapshots-1"
     assert client.tables["performance_snapshots"][0]["as_of_date"] == "2026-04-24"
+    assert repo.list_performance_snapshots("account-1") == [performance]
 
 
 @dataclass
@@ -257,6 +265,10 @@ class FakeQuery:
 
     def lte(self, column: str, value: Any) -> FakeQuery:
         self.filters.append(("lte", column, value))
+        return self
+
+    def in_(self, column: str, values: list[Any]) -> FakeQuery:
+        self.filters.append(("in", column, values))
         return self
 
     def order(self, column: str, *, desc: bool = False) -> FakeQuery:
@@ -323,6 +335,8 @@ class FakeQuery:
                 rows = [row for row in rows if row.get(column) >= value]
             elif operator == "lte":
                 rows = [row for row in rows if row.get(column) <= value]
+            elif operator == "in":
+                rows = [row for row in rows if row.get(column) in set(value)]
         for column, desc in reversed(self.orders):
             rows = sorted(rows, key=lambda row: row.get(column), reverse=desc)
         if self.row_limit is not None:
