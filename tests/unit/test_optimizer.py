@@ -158,6 +158,42 @@ def test_sector_cap_limits_aggregate_sector_weight() -> None:
     assert weights.sum() == pytest.approx(1.0)
 
 
+def test_benchmark_candidate_uses_separate_cap_and_skips_sector_cap() -> None:
+    optimizer_input = pd.DataFrame(
+        {
+            "ticker": ["SPY", "AAA", "BBB"],
+            "expected_return": [0.5, 0.1, 0.0],
+            "eligible_for_optimization": [True, True, True],
+            "gics_sector": ["Benchmark ETF", "Technology", "Technology"],
+            "is_benchmark_candidate": [True, False, False],
+        }
+    )
+    covariance = pd.DataFrame(
+        0.0,
+        index=["SPY", "AAA", "BBB"],
+        columns=["SPY", "AAA", "BBB"],
+    )
+    for ticker in covariance.index:
+        covariance.loc[ticker, ticker] = 0.2
+
+    weights = optimize_long_only(
+        optimizer_input,
+        covariance,
+        OptimizerConfig(
+            max_weight=0.2,
+            benchmark_candidate_max_weight=0.8,
+            risk_aversion=0.1,
+            lambda_turnover=0,
+            commission_rate=0,
+            sector_max_weight=0.2,
+        ),
+    )
+
+    assert weights["SPY"] > 0.2
+    assert weights["SPY"] <= 0.800001
+    assert weights.sum() == pytest.approx(1.0)
+
+
 def test_max_trade_abs_weight_limits_total_absolute_trade() -> None:
     optimizer_input = pd.DataFrame(
         {

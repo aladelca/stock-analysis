@@ -152,6 +152,8 @@ uv run --extra supabase stock-analysis show-latest-portfolio-snapshot \
 
 When `live_account.cashflow_source: actual` is set, `run-one-shot` loads the latest portfolio snapshot on or before the market data date, applies settled cashflows on or after that snapshot date unless they are marked as included in the snapshot, and uses that amount as the rebalance contribution. The monthly deposit assumption remains for backtesting and scenario mode.
 
+By default, SPY remains the benchmark and is also added as an optimizer candidate when price history is available. It uses the separate `optimizer.benchmark_candidate_max_weight` cap, while `optimizer.preserve_outside_holdings` applies to positions that are still outside the optimizer universe.
+
 ```bash
 uv run --extra supabase stock-analysis run-one-shot \
   --config configs/portfolio.local.yaml \
@@ -165,6 +167,8 @@ Recommended cadence:
 - Register deposits as they happen.
 - Import a fresh holdings snapshot after market close when you want measured return tracking.
 - Run recommendations after the fresh snapshot and after any deposit you want considered in the next rebalance.
+- After you execute recommended buys or sells, import a new holdings snapshot before rerunning
+  recommendations. The live flow does not infer executed trades from prior recommendation output.
 
 The live run writes the standard recommendation outputs plus these Tableau-ready gold tables:
 

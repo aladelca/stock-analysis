@@ -20,7 +20,11 @@ from stock_analysis.forecasting.ml_forecast import build_ml_optimizer_inputs
 from stock_analysis.forecasting.outcomes import attach_forecast_outcomes
 from stock_analysis.ingestion.prices import PriceDownload, PriceProvider, YFinancePriceProvider
 from stock_analysis.ingestion.raw_store import write_json, write_text
-from stock_analysis.ingestion.universe import fetch_sp500_html, parse_sp500_constituents
+from stock_analysis.ingestion.universe import (
+    fetch_sp500_html,
+    normalize_provider_ticker,
+    parse_sp500_constituents,
+)
 from stock_analysis.io.csv import write_csv
 from stock_analysis.io.parquet import write_parquet
 from stock_analysis.medallion.bronze import write_bronze_constituents, write_bronze_prices
@@ -70,6 +74,12 @@ def run_one_shot(
 
     html = universe_html or fetch_sp500_html(config.universe.source_url)
     constituents = parse_sp500_constituents(html, requested_as_of_date)
+    if config.prices.include_benchmark_tickers_in_universe:
+        constituents = _add_benchmark_candidates_to_constituents(
+            constituents,
+            config.prices.benchmark_tickers,
+            requested_as_of_date,
+        )
 
     provider = price_provider or YFinancePriceProvider(batch_size=config.prices.batch_size)
     start = requested_as_of_date - timedelta(days=int(config.prices.lookback_years * 365.25))
@@ -347,6 +357,56 @@ def _load_portfolio_state(config: PortfolioConfig) -> PortfolioState:
         cash_balance=config.execution.cash_balance,
         portfolio_value=config.contributions.initial_portfolio_value,
     )
+
+
+def _add_benchmark_candidates_to_constituents(
+    constituents: pd.DataFrame,
+    benchmark_tickers: list[str],
+    as_of_date: date,
+) -> pd.DataFrame:
+    result = constituents.copy()
+    result["is_benchmark_candidate"] = False
+    if not benchmark_tickers:
+        return result
+
+    existing = set(result["ticker"].astype(str))
+    rows: list[dict[str, object]] = []
+    for raw_ticker in benchmark_tickers:
+        ticker = str(raw_ticker).strip()
+        if not ticker or ticker in existing:
+            continue
+        rows.append(_benchmark_candidate_row(ticker, result.columns, as_of_date))
+        existing.add(ticker)
+    if not rows:
+        return result
+    return (
+        pd.concat([result, pd.DataFrame(rows)], ignore_index=True)
+        .sort_values("ticker")
+        .reset_index(drop=True)
+    )
+
+
+def _benchmark_candidate_row(
+    ticker: str,
+    columns: pd.Index,
+    as_of_date: date,
+) -> dict[str, object]:
+    metadata = {
+        "ticker": ticker,
+        "provider_ticker": normalize_provider_ticker(ticker),
+        "security": _benchmark_security_name(ticker),
+        "gics_sector": "Benchmark ETF",
+        "gics_sub_industry": "Broad Market ETF",
+        "as_of_date": as_of_date.isoformat(),
+        "is_benchmark_candidate": True,
+    }
+    return {column: metadata.get(str(column), pd.NA) for column in columns}
+
+
+def _benchmark_security_name(ticker: str) -> str:
+    if ticker == "SPY":
+        return "SPDR S&P 500 ETF Trust"
+    return f"{ticker} benchmark ETF"
 
 
 def _load_rebalance_state(
@@ -627,6 +687,19 @@ def _build_run_metadata(
         "commission_rate": config.optimizer.commission_rate,
         "min_rebalance_trade_weight": config.optimizer.min_rebalance_trade_weight,
         "sector_max_weight": config.optimizer.sector_max_weight,
+        "benchmark_candidate_max_weight": config.optimizer.benchmark_candidate_max_weight,
+        "include_benchmark_tickers_in_universe": (
+            config.prices.include_benchmark_tickers_in_universe
+        ),
+        "benchmark_candidate_tickers": ",".join(
+            constituents.loc[
+                constituents.get(
+                    "is_benchmark_candidate",
+                    pd.Series(False, index=constituents.index),
+                ).astype(bool),
+                "ticker",
+            ].astype(str)
+        ),
         "current_holdings_path": (
             str(config.portfolio_state.current_holdings_path)
             if config.portfolio_state.current_holdings_path is not None

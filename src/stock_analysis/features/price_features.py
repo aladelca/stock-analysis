@@ -57,13 +57,21 @@ def compute_asset_daily_features(
 
     features = pd.DataFrame(rows)
     features = features.merge(
-        constituents[["ticker", "security", "gics_sector", "gics_sub_industry"]],
+        constituents[_constituent_metadata_columns(constituents)],
         on="ticker",
         how="left",
     )
     return validate_columns(
         features.sort_values("ticker").reset_index(drop=True), "asset_daily_features"
     )
+
+
+def _constituent_metadata_columns(constituents: pd.DataFrame) -> list[str]:
+    columns = ["ticker", "security", "gics_sector", "gics_sub_industry"]
+    for optional in ["is_benchmark_candidate"]:
+        if optional in constituents.columns:
+            columns.append(optional)
+    return columns
 
 
 def _momentum(closes: pd.Series, window: int) -> float:

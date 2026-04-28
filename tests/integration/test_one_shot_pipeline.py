@@ -71,6 +71,33 @@ def test_one_shot_pipeline_writes_outputs(
     assert recommendations["as_of_date"].iat[0] == "2026-02-25"
 
 
+def test_one_shot_pipeline_adds_spy_as_optimizer_candidate(
+    sample_html,
+    sample_config,
+    sample_prices,
+) -> None:
+    result = run_one_shot(
+        sample_config,
+        universe_html=sample_html,
+        price_provider=_LongStaticPriceProvider(_prices_with_spy(sample_prices)),
+    )
+    output_root = Path(result.output_root)
+
+    constituents = pd.read_parquet(output_root / "bronze" / "sp500_constituents.parquet")
+    optimizer_input = pd.read_parquet(output_root / "gold" / "optimizer_input.parquet")
+    recommendations = pd.read_parquet(output_root / "gold" / "portfolio_recommendations.parquet")
+
+    spy_constituent = constituents.set_index("ticker").loc["SPY"]
+    spy_optimizer = optimizer_input.set_index("ticker").loc["SPY"]
+    spy_recommendation = recommendations.set_index("ticker").loc["SPY"]
+
+    assert bool(spy_constituent["is_benchmark_candidate"])
+    assert spy_constituent["security"] == "SPDR S&P 500 ETF Trust"
+    assert bool(spy_optimizer["eligible_for_optimization"])
+    assert bool(spy_optimizer["is_benchmark_candidate"])
+    assert spy_recommendation["reason_code"] != "current_holding_outside_optimizer_universe"
+
+
 def test_one_shot_pipeline_emits_sell_for_current_holding_outside_universe(
     sample_html,
     sample_config,
@@ -519,6 +546,29 @@ def _ml_fixture_prices() -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows)
+
+
+def _prices_with_spy(prices: pd.DataFrame) -> pd.DataFrame:
+    result = prices.copy()
+    dates = sorted(result["date"].drop_duplicates().astype(str))
+    rows: list[dict[str, object]] = []
+    for day, current_date in enumerate(dates):
+        close = 400 * (1 + 0.001 * day)
+        rows.append(
+            {
+                "ticker": "SPY",
+                "provider_ticker": "SPY",
+                "date": current_date,
+                "open": close * 0.99,
+                "high": close * 1.01,
+                "low": close * 0.98,
+                "close": close,
+                "adj_close": close,
+                "volume": int(10_000_000 + day),
+                "as_of_date": result["as_of_date"].iat[0],
+            }
+        )
+    return pd.concat([result, pd.DataFrame(rows)], ignore_index=True)
 
 
 def _hyper_table_names(path: Path) -> list[str]:

@@ -92,6 +92,7 @@ def build_ml_optimizer_inputs(
         "ticker",
         "security",
         "gics_sector",
+        *[column for column in ["is_benchmark_candidate"] if column in optimizer_input.columns],
         "expected_return",
         "forecast_score",
         "volatility",

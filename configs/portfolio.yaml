@@ -12,6 +12,7 @@ prices:
   lookback_years: 5
   batch_size: 100
   benchmark_tickers: [SPY]
+  include_benchmark_tickers_in_universe: true
 
 features:
   min_history_days: 252
@@ -46,6 +47,7 @@ forecast:
 
 optimizer:
   max_weight: 0.24
+  benchmark_candidate_max_weight: 0.8
   risk_aversion: 10.0
   min_trade_weight: 0.005
   min_rebalance_trade_weight: 0.005

@@ -160,8 +160,9 @@ def _recommendation_lines_history_frame(
         )
     else:
         merged["expected_return_is_calibrated"] = _bool_series(
-            merged["expected_return_is_calibrated"]
-            .combine_first(merged["run_expected_return_is_calibrated"])
+            merged["expected_return_is_calibrated"].combine_first(
+                merged["run_expected_return_is_calibrated"]
+            )
         )
     return attach_forecast_outcomes(
         merged,

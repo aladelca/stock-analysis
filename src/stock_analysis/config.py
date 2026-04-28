@@ -24,6 +24,7 @@ class PriceConfig(BaseModel):
     lookback_years: int = Field(default=5, ge=1, le=30)
     batch_size: int = Field(default=100, ge=1, le=500)
     benchmark_tickers: list[str] = Field(default_factory=lambda: ["SPY"])
+    include_benchmark_tickers_in_universe: bool = True
 
 
 class FeatureConfig(BaseModel):
@@ -93,6 +94,7 @@ class ForecastConfig(BaseModel):
 
 class OptimizerConfig(BaseModel):
     max_weight: float = Field(default=0.05, gt=0, le=1)
+    benchmark_candidate_max_weight: float | None = Field(default=0.8, gt=0, le=1)
     risk_aversion: float = Field(default=10.0, ge=0)
     min_trade_weight: float = Field(default=0.005, ge=0)
     min_rebalance_trade_weight: float = Field(default=0.005, ge=0)

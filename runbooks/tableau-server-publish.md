@@ -39,6 +39,7 @@ forecast:
 
 optimizer:
   max_weight: 0.24
+  benchmark_candidate_max_weight: 0.8
   lambda_turnover: 5.0
   preserve_outside_holdings: true
 

@@ -76,6 +76,8 @@ run:
 prices:
   provider: yfinance
   lookback_years: 5
+  benchmark_tickers: [SPY]
+  include_benchmark_tickers_in_universe: true
 
 forecast:
   engine: ml
@@ -86,6 +88,7 @@ forecast:
 
 optimizer:
   max_weight: 0.24
+  benchmark_candidate_max_weight: 0.8
   risk_aversion: 10.0
   commission_rate: 0.02
   min_rebalance_trade_weight: 0.005
@@ -126,14 +129,19 @@ Notes:
 - `forecast.ml_model_version: lightgbm_return_zscore` uses the best researched PIT
   production-economics candidate from `docs/experiments/autoresearch-summary.md`.
 - `forecast.ml_score_scale: 1.0` keeps the candidate's z-scored forecast scale unchanged.
+- `prices.include_benchmark_tickers_in_universe: true` makes SPY both the benchmark and an
+  eligible optimizer candidate when SPY price history is available.
+- `optimizer.benchmark_candidate_max_weight: 0.8` gives benchmark ETFs a separate cap from the
+  single-stock `optimizer.max_weight`.
 - `portfolio_state.current_holdings_path: null` means first-allocation mode.
 - `contributions.monthly_deposit_amount: 0.0` disables scenario-mode deposit modeling for the
   one-shot run. Backtests and autoresearch still use the monthly deposit assumption when supplied.
 - For live account tracking with arbitrary-date deposits, use the Supabase flow in
   `runbooks/supabase-account-tracking.md` and set `live_account.cashflow_source: actual`.
 - `execution.no_trade_band: 0.04` avoids small trades below 4% of portfolio value.
-- `optimizer.preserve_outside_holdings: true` keeps current positions outside the stock optimizer
-  universe, such as SPY, unless you explicitly turn that off.
+- `optimizer.preserve_outside_holdings: true` keeps current positions outside the optimizer
+  universe. SPY is no longer outside the universe by default because it is added as a benchmark ETF
+  candidate.
 - `optimizer.commission_rate: 0.02` charges 2% of absolute traded portfolio weight.
 - `mlflow.enabled: true` logs parameters, recommendation metrics, risk metrics, and gold artifacts.
 - Set `tableau.export_hyper: true` only after installing the Tableau extra.
@@ -394,6 +402,7 @@ forecast:
 
 optimizer:
   max_weight: 0.24
+  benchmark_candidate_max_weight: 0.8
   lambda_turnover: 5.0
   preserve_outside_holdings: true
 
@@ -498,6 +507,7 @@ forecast:
 
 optimizer:
   max_weight: 0.24
+  benchmark_candidate_max_weight: 0.8
   lambda_turnover: 5.0
   preserve_outside_holdings: true
 

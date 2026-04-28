@@ -40,7 +40,7 @@ def compute_asset_feature_panel(
         panel = _add_cross_sectional_ranks(panel, config)
 
     panel = panel.merge(
-        constituents[["ticker", "security", "gics_sector", "gics_sub_industry"]].drop_duplicates(
+        constituents[_constituent_metadata_columns(constituents)].drop_duplicates(
             subset=["ticker"]
         ),
         on="ticker",
@@ -50,6 +50,14 @@ def compute_asset_feature_panel(
     panel = panel.sort_values(["ticker", "date"]).reset_index(drop=True)
     panel["date"] = panel["date"].dt.date.astype(str)
     return validate_columns(panel, "asset_daily_features_panel")
+
+
+def _constituent_metadata_columns(constituents: pd.DataFrame) -> list[str]:
+    columns = ["ticker", "security", "gics_sector", "gics_sub_industry"]
+    for optional in ["is_benchmark_candidate"]:
+        if optional in constituents.columns:
+            columns.append(optional)
+    return columns
 
 
 def _prepare_prices(daily_prices: pd.DataFrame) -> pd.DataFrame:
