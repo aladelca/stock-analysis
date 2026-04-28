@@ -72,6 +72,7 @@ class RecommendationRunRecord:
     model_version: str
     ml_score_scale: float
     config_hash: str
+    expected_return_is_calibrated: bool = False
     status: str = "completed"
     id: str | None = None
 
@@ -93,7 +94,10 @@ class RecommendationLineRecord:
     cash_after_trade_amount: float | None = None
     action: str | None = None
     reason_code: str | None = None
+    forecast_score: float | None = None
     expected_return: float | None = None
+    calibrated_expected_return: float | None = None
+    expected_return_is_calibrated: bool | None = None
     volatility: float | None = None
     forecast_horizon_days: int | None = None
     forecast_start_date: date | None = None
@@ -114,6 +118,9 @@ class PerformanceSnapshotRecord:
     account_total_value: float
     total_deposits: float
     net_external_cashflow: float
+    initial_value: float | None = None
+    invested_capital: float | None = None
+    return_on_invested_capital: float | None = None
     account_time_weighted_return: float | None = None
     account_money_weighted_return: float | None = None
     spy_same_cashflow_value: float | None = None

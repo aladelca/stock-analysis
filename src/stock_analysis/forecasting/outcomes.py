@@ -130,11 +130,18 @@ def _outcome_for_row(
 
     realized = _forward_return(path, start_date, horizon)
     if realized is None:
-        return _empty_outcome(_pending_or_unavailable(path, start_date))
+        status = _pending_or_unavailable(path, start_date)
+        planned_end_date = (
+            _planned_forecast_end_date(path, spy_path, start_date, horizon)
+            if status == OUTCOME_PENDING
+            else None
+        )
+        return _empty_outcome(status, forecast_end_date=planned_end_date)
 
     spy_realized = _forward_return(spy_path, start_date, horizon) if spy_path is not None else None
     active = realized.value - spy_realized.value if spy_realized is not None else None
-    expected = _float_or_none(row.get("expected_return"))
+    expected = _calibrated_expected_return(row)
+    directional_signal = _directional_signal(row, expected)
     forecast_error = realized.value - expected if expected is not None else None
     return _Outcome(
         forecast_end_date=realized.end_date,
@@ -142,7 +149,7 @@ def _outcome_for_row(
         realized_spy_return=spy_realized.value if spy_realized is not None else None,
         realized_active_return=active,
         forecast_error=forecast_error,
-        forecast_hit=_forecast_hit(expected, realized.value),
+        forecast_hit=_forecast_hit(directional_signal, realized.value),
         outcome_status=OUTCOME_REALIZED,
     )
 
@@ -179,9 +186,42 @@ def _pending_or_unavailable(path: pd.DataFrame, start_date: str) -> str:
     return OUTCOME_UNAVAILABLE
 
 
-def _empty_outcome(status: str) -> _Outcome:
+def _planned_forecast_end_date(
+    path: pd.DataFrame,
+    spy_path: pd.DataFrame | None,
+    start_date: str,
+    horizon: int,
+) -> str | None:
+    for candidate_path in (spy_path, path):
+        candidate = _path_end_date(candidate_path, start_date, horizon)
+        if candidate is not None:
+            return candidate
+    dates = pd.bdate_range(start=start_date, periods=horizon + 1)
+    if len(dates) <= horizon:
+        return None
+    return dates[horizon].date().isoformat()
+
+
+def _path_end_date(
+    path: pd.DataFrame | None,
+    start_date: str,
+    horizon: int,
+) -> str | None:
+    if path is None or path.empty:
+        return None
+    dates = pd.to_datetime(path["date"]).dt.date.astype(str)
+    matches = dates[dates == start_date].index.tolist()
+    if not matches:
+        return None
+    end_position = int(matches[0]) + horizon
+    if end_position >= len(path):
+        return None
+    return pd.Timestamp(path.iloc[end_position]["date"]).date().isoformat()
+
+
+def _empty_outcome(status: str, *, forecast_end_date: str | None = None) -> _Outcome:
     return _Outcome(
-        forecast_end_date=None,
+        forecast_end_date=forecast_end_date,
         realized_return=None,
         realized_spy_return=None,
         realized_active_return=None,
@@ -189,6 +229,24 @@ def _empty_outcome(status: str) -> _Outcome:
         forecast_hit=None,
         outcome_status=status,
     )
+
+
+def _calibrated_expected_return(row: dict[str, Any]) -> float | None:
+    calibrated = _float_or_none(row.get("calibrated_expected_return"))
+    if calibrated is not None:
+        return calibrated
+    if _bool_or_false(row.get("expected_return_is_calibrated")):
+        return _float_or_none(row.get("expected_return"))
+    return None
+
+
+def _directional_signal(row: dict[str, Any], calibrated_expected: float | None) -> float | None:
+    if calibrated_expected is not None:
+        return calibrated_expected
+    score = _float_or_none(row.get("forecast_score"))
+    if score is not None:
+        return score
+    return _float_or_none(row.get("expected_return"))
 
 
 def _forecast_hit(expected: float | None, realized: float) -> bool | None:
@@ -217,6 +275,14 @@ def _int_or_none(value: object) -> int | None:
     if _is_missing(value):
         return None
     return int(cast(Any, value))
+
+
+def _bool_or_false(value: object) -> bool:
+    if _is_missing(value):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y"}
+    return bool(value)
 
 
 def _is_missing(value: object) -> bool:

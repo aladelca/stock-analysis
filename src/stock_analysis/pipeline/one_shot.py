@@ -409,6 +409,10 @@ def _persist_account_tracking_outputs(
             model_version=_required_str(metadata.get("model_version"), "model_version"),
             ml_score_scale=float(config.forecast.ml_score_scale),
             config_hash=_required_str(metadata.get("config_hash"), "config_hash"),
+            expected_return_is_calibrated=_optional_bool(
+                metadata.get("expected_return_is_calibrated")
+            )
+            or False,
         )
     )
     if recommendation_run.id is None:
@@ -432,6 +436,9 @@ def _persist_account_tracking_outputs(
                 net_external_cashflow=_required_float(
                     row.get("net_external_cashflow"), "net_external_cashflow"
                 ),
+                initial_value=_optional_float(row.get("initial_value")),
+                invested_capital=_optional_float(row.get("invested_capital")),
+                return_on_invested_capital=_optional_float(row.get("return_on_invested_capital")),
                 account_time_weighted_return=_optional_float(
                     row.get("account_time_weighted_return")
                 ),
@@ -467,7 +474,10 @@ def _recommendation_line_record(
         cash_after_trade_amount=_optional_float(row.get("cash_after_trade_amount")),
         action=_optional_str(row.get("action")),
         reason_code=_optional_str(row.get("reason_code")),
+        forecast_score=_optional_float(row.get("forecast_score")),
         expected_return=_optional_float(row.get("expected_return")),
+        calibrated_expected_return=_optional_float(row.get("calibrated_expected_return")),
+        expected_return_is_calibrated=_optional_bool(row.get("expected_return_is_calibrated")),
         volatility=_optional_float(row.get("volatility")),
         forecast_horizon_days=_optional_int(row.get("forecast_horizon_days")),
         forecast_start_date=_optional_date(row.get("forecast_start_date")),

@@ -63,6 +63,20 @@ FIELDS: dict[str, TableauField] = {
     "forecast_score": TableauField(
         "forecast_score", "real", "measure", "quantitative", "Forecast Score"
     ),
+    "expected_return_is_calibrated": TableauField(
+        "expected_return_is_calibrated",
+        "boolean",
+        "dimension",
+        "nominal",
+        "Expected Return Is Calibrated",
+    ),
+    "calibrated_expected_return": TableauField(
+        "calibrated_expected_return",
+        "real",
+        "measure",
+        "quantitative",
+        "Calibrated Expected Return",
+    ),
     "forecast_horizon_days": TableauField(
         "forecast_horizon_days", "integer", "dimension", "nominal", "Forecast Horizon Days"
     ),
@@ -92,10 +106,19 @@ FIELDS: dict[str, TableauField] = {
     "target_weight": TableauField(
         "target_weight", "real", "measure", "quantitative", "Target Weight"
     ),
+    "display_target_weight": TableauField(
+        "display_target_weight", "real", "measure", "quantitative", "Display Target Weight"
+    ),
     "current_weight": TableauField(
         "current_weight", "real", "measure", "quantitative", "Current Weight"
     ),
+    "display_current_weight": TableauField(
+        "display_current_weight", "real", "measure", "quantitative", "Display Current Weight"
+    ),
     "trade_weight": TableauField("trade_weight", "real", "measure", "quantitative", "Trade Weight"),
+    "display_trade_weight": TableauField(
+        "display_trade_weight", "real", "measure", "quantitative", "Display Trade Weight"
+    ),
     "trade_abs_weight": TableauField(
         "trade_abs_weight", "real", "measure", "quantitative", "Trade Abs Weight"
     ),
@@ -153,6 +176,9 @@ FIELDS: dict[str, TableauField] = {
     "no_trade_band_applied": TableauField(
         "no_trade_band_applied", "boolean", "dimension", "nominal", "No Trade Band Applied"
     ),
+    "is_solver_dust": TableauField(
+        "is_solver_dust", "boolean", "dimension", "nominal", "Solver Dust"
+    ),
     "trade_notional_label": TableauField(
         "trade_notional_label", "string", "dimension", "nominal", "Trade Notional Label"
     ),
@@ -208,6 +234,29 @@ FIELDS: dict[str, TableauField] = {
     "portfolio_concentration_hhi": TableauField(
         "portfolio_concentration_hhi", "real", "measure", "quantitative", "Concentration HHI"
     ),
+    "account_total_value": TableauField(
+        "account_total_value", "real", "measure", "quantitative", "Account Total Value"
+    ),
+    "account_initial_value": TableauField(
+        "account_initial_value", "real", "measure", "quantitative", "Account Initial Value"
+    ),
+    "account_total_deposits": TableauField(
+        "account_total_deposits", "real", "measure", "quantitative", "Account Total Deposits"
+    ),
+    "account_invested_capital": TableauField(
+        "account_invested_capital",
+        "real",
+        "measure",
+        "quantitative",
+        "Account Invested Capital",
+    ),
+    "account_return_on_invested_capital": TableauField(
+        "account_return_on_invested_capital",
+        "real",
+        "measure",
+        "quantitative",
+        "Account Return On Invested Capital",
+    ),
     "run_requested_as_of_date": TableauField(
         "run_requested_as_of_date", "date", "dimension", "nominal", "Requested Data Date"
     ),
@@ -229,6 +278,13 @@ FIELDS: dict[str, TableauField] = {
     "run_config_hash_short": TableauField(
         "run_config_hash_short", "string", "dimension", "nominal", "Config Hash"
     ),
+    "run_expected_return_is_calibrated": TableauField(
+        "run_expected_return_is_calibrated",
+        "string",
+        "dimension",
+        "nominal",
+        "Run Expected Return Is Calibrated",
+    ),
     "portfolio_footer_label": TableauField(
         "portfolio_footer_label",
         "string",
@@ -247,7 +303,7 @@ FIELDS: dict[str, TableauField] = {
         "dimension",
         "nominal",
         "Holding Ticker",
-        "IF [target_weight] > 0 THEN [ticker] END",
+        "IF [selected] THEN [ticker] END",
     ),
     "holding_security": TableauField(
         "holding_security",
@@ -255,7 +311,7 @@ FIELDS: dict[str, TableauField] = {
         "dimension",
         "nominal",
         "Holding Security",
-        "IF [target_weight] > 0 THEN [security] END",
+        "IF [selected] THEN [security] END",
     ),
     "holding_weight": TableauField(
         "holding_weight",
@@ -263,7 +319,7 @@ FIELDS: dict[str, TableauField] = {
         "measure",
         "quantitative",
         "Holding Weight",
-        "IF [target_weight] > 0 THEN [target_weight] END",
+        "IF [selected] THEN [display_target_weight] END",
     ),
     "holding_weight_label": TableauField(
         "holding_weight_label",
@@ -271,7 +327,7 @@ FIELDS: dict[str, TableauField] = {
         "dimension",
         "nominal",
         "Holding Weight Label",
-        "IF [target_weight] > 0 THEN [target_weight_label] END",
+        "IF [selected] THEN [target_weight_label] END",
     ),
     "trade_ticker": TableauField(
         "trade_ticker",

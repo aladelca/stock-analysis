@@ -38,11 +38,17 @@ def test_account_tracking_marts_include_cashflows_performance_and_recommendation
     assert tables["cashflows"]["is_applied_to_recommendation"].tolist() == [False, True]
     assert tables["recommendation_runs"]["unapplied_cashflow_amount"].iat[0] == pytest.approx(100.0)
     assert tables["recommendation_lines"]["recommendation_key"].iat[0] == "run-1:AAPL"
+    assert tables["recommendation_lines"]["forecast_score"].iat[0] == pytest.approx(0.2)
     assert tables["recommendation_lines"]["forecast_horizon_days"].iat[0] == 5
     assert tables["recommendation_lines"]["outcome_status"].iat[0] == "pending"
 
     performance = tables["performance_snapshots"].set_index("as_of_date")
+    assert performance.loc["2026-01-02", "initial_value"] == pytest.approx(1000.0)
+    assert performance.loc["2026-01-02", "invested_capital"] == pytest.approx(1000.0)
     assert performance.loc["2026-01-10", "total_deposits"] == pytest.approx(100.0)
+    assert performance.loc["2026-01-10", "initial_value"] == pytest.approx(1000.0)
+    assert performance.loc["2026-01-10", "invested_capital"] == pytest.approx(1100.0)
+    assert performance.loc["2026-01-10", "return_on_invested_capital"] == pytest.approx(0.1)
     assert performance.loc["2026-01-10", "account_time_weighted_return"] == pytest.approx(0.11)
     assert performance.loc["2026-01-10", "spy_same_cashflow_value"] > 1000.0
 
@@ -79,7 +85,42 @@ def test_dashboard_mart_exposes_latest_account_performance_fields() -> None:
 
     assert "account_total_value" in mart.columns
     assert mart["account_total_value"].iat[0] == pytest.approx(1210.0)
+    assert mart["account_initial_value"].iat[0] == pytest.approx(1000.0)
+    assert mart["account_invested_capital"].iat[0] == pytest.approx(1100.0)
     assert mart["run_live_cashflow_source"].iat[0] == "actual"
+
+
+def test_dashboard_mart_ignores_solver_dust_for_selected_rows() -> None:
+    recommendations = pd.concat(
+        [
+            _recommendations(),
+            pd.DataFrame(
+                [
+                    {
+                        **_recommendations().iloc[0].to_dict(),
+                        "ticker": "DUST",
+                        "target_weight": 1e-10,
+                        "trade_weight": 1e-10,
+                        "trade_abs_weight": 1e-10,
+                        "rebalance_required": False,
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    mart = build_dashboard_mart(
+        recommendations,
+        _risk_metrics(),
+        _sector_exposure(),
+        _run_metadata(),
+    )
+    by_ticker = mart.set_index("ticker")
+
+    assert bool(by_ticker.loc["DUST", "is_solver_dust"]) is True
+    assert bool(by_ticker.loc["DUST", "selected"]) is False
+    assert by_ticker.loc["DUST", "display_target_weight"] == pytest.approx(0.0)
 
 
 def _live_state(*, first_cashflow_date: date = date(2026, 1, 5)) -> LivePortfolioState:
@@ -156,7 +197,10 @@ def _recommendations() -> pd.DataFrame:
                 "ticker": "AAPL",
                 "security": "Apple",
                 "gics_sector": "Information Technology",
+                "forecast_score": 0.2,
                 "expected_return": 0.02,
+                "calibrated_expected_return": pd.NA,
+                "expected_return_is_calibrated": False,
                 "forecast_horizon_days": 5,
                 "forecast_start_date": "2026-01-10",
                 "outcome_status": "pending",

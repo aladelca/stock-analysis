@@ -25,9 +25,15 @@ holding_snapshots.csv
 recommendation_runs.csv
 recommendation_lines.csv
 performance_snapshots.csv
+cashflows_history.csv
+portfolio_snapshots_history.csv
+holding_snapshots_history.csv
+recommendation_runs_history.csv
+recommendation_lines_history.csv
+performance_snapshots_history.csv
 ```
 
-Use these files for deposit history, snapshot history, and return tracking. The Python-generated Hyper extract also includes these tables when they exist for the run.
+Use the current-run tables for the latest recommendation screen. Use the `_history` tables for recommendation history, forecast-vs-realized views, deposit history, snapshot history, and return tracking. The Python-generated Hyper extract includes these tables with stable names when live account tracking is enabled.
 
 5. Output the mart to:
 

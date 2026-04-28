@@ -74,6 +74,12 @@ The generated Hyper file always contains `portfolio_dashboard_mart`. When live a
 - `recommendation_runs`
 - `recommendation_lines`
 - `performance_snapshots`
+- `cashflows_history`
+- `portfolio_snapshots_history`
+- `holding_snapshots_history`
+- `recommendation_runs_history`
+- `recommendation_lines_history`
+- `performance_snapshots_history`
 
 The CSV mirrors under `data/runs/$RUN_ID/gold/csv/` are still written for Tableau Prep, audit, and fallback connections.
 

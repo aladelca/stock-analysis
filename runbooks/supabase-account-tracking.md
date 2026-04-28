@@ -181,6 +181,9 @@ For live account runs, `recommendation_runs`, `recommendation_lines`, and `perfo
 
 Recommendation lines now include forecast outcome fields:
 
+- `forecast_score`
+- `expected_return_is_calibrated`
+- `calibrated_expected_return`
 - `forecast_horizon_days`
 - `forecast_start_date`
 - `forecast_end_date`
@@ -191,7 +194,9 @@ Recommendation lines now include forecast outcome fields:
 - `forecast_hit`
 - `outcome_status`
 
-For the latest run, these fields are usually `pending` because the 5-trading-day horizon has not elapsed. When `export-tableau` is run later with enough price history, the historical recommendation export recalculates realized horizon outcomes from the available adjusted-close data.
+For the latest run, the realized fields are usually `pending` because the 5-trading-day horizon has not elapsed. `forecast_end_date` is still populated as the planned horizon end date so Tableau can show the forecast window immediately. When `export-tableau` is run later with enough price history, the historical recommendation export recalculates realized horizon outcomes from the available adjusted-close data.
+
+`forecast_error` is populated only when a calibrated expected return exists. The current ML model exports an uncalibrated `forecast_score`, so Tableau should treat it as a ranking/optimization score, not as a predicted percentage return.
 
 For Supabase-backed accounts, `export-tableau` also emits account-level history tables when credentials are available:
 
@@ -202,9 +207,9 @@ For Supabase-backed accounts, `export-tableau` also emits account-level history 
 - `recommendation_lines_history`
 - `performance_snapshots_history`
 
-Use `recommendation_lines_history` for Tableau views that need recommendation history by ticker, action, model version, run date, forecast score, realized return, active return versus SPY, and hit/miss status. Use the single-run `recommendation_lines` table only for the current run.
+Use `recommendation_lines_history` for Tableau views that need recommendation history by ticker, action, model version, run date, forecast score, realized return, active return versus SPY, and hit/miss status. Use the single-run `recommendation_lines` table only for the current run. Empty history tables are still emitted with stable column names so Tableau extracts do not change shape across refreshes.
 
-`performance_snapshots` uses actual imported portfolio snapshots as valuation points. If you want return tracking to be meaningful, import a fresh snapshot after market close before running the recommendation flow. Cashflows after the latest snapshot are still used for recommendations, but they are not a substitute for an updated valuation snapshot.
+`performance_snapshots` uses actual imported portfolio snapshots as valuation points. If you want return tracking to be meaningful, import a fresh snapshot after market close before running the recommendation flow. Cashflows after the latest snapshot are still used for recommendations, but they are not a substitute for an updated valuation snapshot. Performance rows include `initial_value`, `total_deposits`, `invested_capital`, and `return_on_invested_capital` so Tableau can distinguish the starting account value from later deposits.
 
 ## Operational Notes
 

@@ -22,6 +22,7 @@ def build_recommendations(
     no_trade_band: float = 0.0,
 ) -> pd.DataFrame:
     result = optimizer_input.copy()
+    result = _attach_forecast_semantics(result)
     result["target_weight"] = result["ticker"].map(weights).fillna(0.0).astype(float)
     aligned_current_weights = (
         rebalance_context.current_weights
@@ -111,7 +112,10 @@ def build_recommendations(
         "ticker",
         "security",
         "gics_sector",
+        "forecast_score",
         "expected_return",
+        "calibrated_expected_return",
+        "expected_return_is_calibrated",
         "volatility",
         "current_weight",
         "target_weight",
@@ -222,7 +226,10 @@ def _current_holdings_outside_optimizer_universe(
             "ticker": outside.index,
             "security": outside.index,
             "gics_sector": "Unknown",
+            "forecast_score": np.nan,
             "expected_return": np.nan,
+            "calibrated_expected_return": np.nan,
+            "expected_return_is_calibrated": False,
             "volatility": np.nan,
             "eligible_for_optimization": False,
             "target_weight": 0.0,
@@ -230,6 +237,36 @@ def _current_holdings_outside_optimizer_universe(
             "_outside_optimizer_universe": True,
         }
     )
+
+
+def _attach_forecast_semantics(result: pd.DataFrame) -> pd.DataFrame:
+    enriched = result.copy()
+    expected_return = (
+        enriched["expected_return"]
+        if "expected_return" in enriched.columns
+        else pd.Series(np.nan, index=enriched.index)
+    )
+    if "forecast_score" not in enriched.columns:
+        enriched["forecast_score"] = expected_return
+    if "expected_return_is_calibrated" not in enriched.columns:
+        enriched["expected_return_is_calibrated"] = False
+    enriched["expected_return_is_calibrated"] = (
+        enriched["expected_return_is_calibrated"].fillna(False).astype(bool)
+    )
+    if "calibrated_expected_return" not in enriched.columns:
+        enriched["calibrated_expected_return"] = np.where(
+            enriched["expected_return_is_calibrated"],
+            pd.to_numeric(expected_return, errors="coerce"),
+            np.nan,
+        )
+    else:
+        calibrated = pd.to_numeric(enriched["calibrated_expected_return"], errors="coerce")
+        expected = pd.to_numeric(expected_return, errors="coerce")
+        enriched["calibrated_expected_return"] = calibrated.where(
+            calibrated.notna(),
+            expected.where(enriched["expected_return_is_calibrated"]),
+        )
+    return enriched
 
 
 def _attach_rebalance_plan(

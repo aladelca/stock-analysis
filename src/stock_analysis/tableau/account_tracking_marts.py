@@ -48,8 +48,11 @@ def latest_performance_fields(performance_snapshots: pd.DataFrame) -> dict[str, 
     row = sorted_frame.sort_values("as_of_date").iloc[-1].to_dict()
     return {
         "account_total_value": row.get("account_total_value"),
+        "account_initial_value": row.get("initial_value"),
         "account_total_deposits": row.get("total_deposits"),
+        "account_invested_capital": row.get("invested_capital"),
         "account_net_external_cashflow": row.get("net_external_cashflow"),
+        "account_return_on_invested_capital": row.get("return_on_invested_capital"),
         "account_time_weighted_return": row.get("account_time_weighted_return"),
         "account_money_weighted_return": row.get("account_money_weighted_return"),
         "spy_same_cashflow_value": row.get("spy_same_cashflow_value"),
@@ -69,6 +72,7 @@ def _run_context(run_metadata: pd.DataFrame) -> dict[str, object]:
         "run_as_of_date": row.get("data_as_of_date") or row.get("as_of_date"),
         "run_requested_as_of_date": row.get("requested_as_of_date"),
         "model_version": row.get("model_version"),
+        "expected_return_is_calibrated": row.get("expected_return_is_calibrated"),
         "config_hash": row.get("config_hash"),
         "created_at_utc": row.get("created_at_utc"),
     }
@@ -227,6 +231,8 @@ def _performance_snapshots_table(
             for cashflow in live_state.cashflows
             if first_snapshot.snapshot_date < cashflow.cashflow_date <= snapshot.snapshot_date
         ]
+        total_deposits = _total_deposits(cashflows_to_date)
+        invested_capital = float(first_snapshot.total_value) + total_deposits
         account_mwr_cashflows = [
             (first_snapshot.snapshot_date, -float(first_snapshot.total_value)),
             *[(cashflow.cashflow_date, -float(cashflow.amount)) for cashflow in cashflows_to_date],
@@ -253,8 +259,15 @@ def _performance_snapshots_table(
                 "as_of_date": snapshot.snapshot_date.isoformat(),
                 "source_snapshot_id": snapshot.id,
                 "account_total_value": snapshot.total_value,
-                "total_deposits": _total_deposits(cashflows_to_date),
+                "initial_value": first_snapshot.total_value,
+                "total_deposits": total_deposits,
+                "invested_capital": invested_capital,
                 "net_external_cashflow": sum(cashflow.amount for cashflow in cashflows_to_date),
+                "return_on_invested_capital": (
+                    float(snapshot.total_value / invested_capital - 1)
+                    if invested_capital > 0
+                    else None
+                ),
                 "account_time_weighted_return": cumulative_time_weighted_return(twr_returns),
                 "account_money_weighted_return": money_weighted_return(account_mwr_cashflows),
                 "spy_same_cashflow_value": benchmark.get("spy_same_cashflow_value"),
@@ -446,6 +459,7 @@ def _recommendation_run_columns() -> list[str]:
         "base_currency",
         "model_version",
         "config_hash",
+        "expected_return_is_calibrated",
         "created_at_utc",
         "snapshot_id",
         "snapshot_date",
@@ -464,7 +478,10 @@ def _recommendation_line_columns() -> list[str]:
         "ticker",
         "security",
         "gics_sector",
+        "forecast_score",
         "expected_return",
+        "calibrated_expected_return",
+        "expected_return_is_calibrated",
         "volatility",
         "forecast_horizon_days",
         "forecast_start_date",
@@ -497,8 +514,11 @@ def _performance_snapshot_columns() -> list[str]:
         "as_of_date",
         "source_snapshot_id",
         "account_total_value",
+        "initial_value",
         "total_deposits",
+        "invested_capital",
         "net_external_cashflow",
+        "return_on_invested_capital",
         "account_time_weighted_return",
         "account_money_weighted_return",
         "spy_same_cashflow_value",

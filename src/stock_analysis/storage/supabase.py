@@ -18,6 +18,8 @@ from stock_analysis.storage.contracts import (
     RecommendationRunRecord,
 )
 
+SUPABASE_PAGE_SIZE = 1000
+
 
 class SupabaseConfigError(RuntimeError):
     """Raised when Supabase is enabled but credentials or dependencies are missing."""
@@ -103,8 +105,8 @@ class SupabaseAccountTrackingRepository:
             query = query.gte("cashflow_date", start_date.isoformat())
         if end_date is not None:
             query = query.lte("cashflow_date", end_date.isoformat())
-        response = _execute(query.order("cashflow_date").order("created_at"))
-        return [_cashflow_from_row(row) for row in response.data or []]
+        rows = _execute_all(query.order("cashflow_date").order("created_at"))
+        return [_cashflow_from_row(row) for row in rows]
 
     def insert_portfolio_snapshot(
         self,
@@ -180,17 +182,17 @@ class SupabaseAccountTrackingRepository:
             query = query.gte("snapshot_date", start_date.isoformat())
         if end_date is not None:
             query = query.lte("snapshot_date", end_date.isoformat())
-        response = _execute(query.order("snapshot_date").order("created_at"))
-        return [_portfolio_snapshot_from_row(row) for row in response.data or []]
+        rows = _execute_all(query.order("snapshot_date").order("created_at"))
+        return [_portfolio_snapshot_from_row(row) for row in rows]
 
     def list_holding_snapshots(self, snapshot_id: str) -> list[HoldingSnapshotRecord]:
-        response = _execute(
+        rows = _execute_all(
             self._table(self._config.holding_snapshots_table)
             .select("*")
             .eq("snapshot_id", snapshot_id)
             .order("ticker")
         )
-        return [_holding_snapshot_from_row(row) for row in response.data or []]
+        return [_holding_snapshot_from_row(row) for row in rows]
 
     def insert_recommendation_run(self, run: RecommendationRunRecord) -> RecommendationRunRecord:
         response = _execute(
@@ -233,8 +235,8 @@ class SupabaseAccountTrackingRepository:
             query = query.gte("data_as_of_date", start_date.isoformat())
         if end_date is not None:
             query = query.lte("data_as_of_date", end_date.isoformat())
-        response = _execute(query.order("data_as_of_date").order("created_at"))
-        return [_recommendation_run_from_row(row) for row in response.data or []]
+        rows = _execute_all(query.order("data_as_of_date").order("created_at"))
+        return [_recommendation_run_from_row(row) for row in rows]
 
     def list_recommendation_lines(
         self,
@@ -242,13 +244,13 @@ class SupabaseAccountTrackingRepository:
     ) -> list[RecommendationLineRecord]:
         if not recommendation_run_ids:
             return []
-        response = _execute(
+        rows = _execute_all(
             self._table(self._config.recommendation_lines_table)
             .select("*")
             .in_("recommendation_run_id", recommendation_run_ids)
             .order("ticker")
         )
-        return [_recommendation_line_from_row(row) for row in response.data or []]
+        return [_recommendation_line_from_row(row) for row in rows]
 
     def insert_performance_snapshot(
         self,
@@ -280,8 +282,8 @@ class SupabaseAccountTrackingRepository:
             query = query.gte("as_of_date", start_date.isoformat())
         if end_date is not None:
             query = query.lte("as_of_date", end_date.isoformat())
-        response = _execute(query.order("as_of_date").order("created_at"))
-        return [_performance_snapshot_from_row(row) for row in response.data or []]
+        rows = _execute_all(query.order("as_of_date").order("created_at"))
+        return [_performance_snapshot_from_row(row) for row in rows]
 
     def _table(self, name: str) -> Any:
         if self._config.schema_name == "public":
@@ -295,6 +297,19 @@ def _execute(query: Any) -> Any:
     except Exception as exc:
         msg = f"Supabase query failed: {exc}"
         raise SupabaseRepositoryError(msg) from exc
+
+
+def _execute_all(query: Any, *, page_size: int | None = None) -> list[Mapping[str, Any]]:
+    page_size = SUPABASE_PAGE_SIZE if page_size is None else page_size
+    rows: list[Mapping[str, Any]] = []
+    start = 0
+    while True:
+        response = _execute(query.range(start, start + page_size - 1))
+        batch = [cast(Mapping[str, Any], row) for row in response.data or []]
+        rows.extend(batch)
+        if len(batch) < page_size:
+            return rows
+        start += page_size
 
 
 def _single_response_row(response: Any, table_name: str) -> Mapping[str, Any]:
@@ -379,6 +394,8 @@ def _recommendation_run_from_row(row: Mapping[str, Any]) -> RecommendationRunRec
         model_version=str(row["model_version"]),
         ml_score_scale=float(row["ml_score_scale"]),
         config_hash=str(row["config_hash"]),
+        expected_return_is_calibrated=_optional_bool(row.get("expected_return_is_calibrated"))
+        or False,
         status=str(row.get("status") or "completed"),
     )
 
@@ -401,7 +418,10 @@ def _recommendation_line_from_row(row: Mapping[str, Any]) -> RecommendationLineR
         cash_after_trade_amount=_optional_float(row.get("cash_after_trade_amount")),
         action=_optional_str(row.get("action")),
         reason_code=_optional_str(row.get("reason_code")),
+        forecast_score=_optional_float(row.get("forecast_score")),
         expected_return=_optional_float(row.get("expected_return")),
+        calibrated_expected_return=_optional_float(row.get("calibrated_expected_return")),
+        expected_return_is_calibrated=_optional_bool(row.get("expected_return_is_calibrated")),
         volatility=_optional_float(row.get("volatility")),
         forecast_horizon_days=_optional_int(row.get("forecast_horizon_days")),
         forecast_start_date=_optional_date(row.get("forecast_start_date")),
@@ -423,6 +443,9 @@ def _performance_snapshot_from_row(row: Mapping[str, Any]) -> PerformanceSnapsho
         account_total_value=float(row["account_total_value"]),
         total_deposits=float(row["total_deposits"]),
         net_external_cashflow=float(row["net_external_cashflow"]),
+        initial_value=_optional_float(row.get("initial_value")),
+        invested_capital=_optional_float(row.get("invested_capital")),
+        return_on_invested_capital=_optional_float(row.get("return_on_invested_capital")),
         account_time_weighted_return=_optional_float(row.get("account_time_weighted_return")),
         account_money_weighted_return=_optional_float(row.get("account_money_weighted_return")),
         spy_same_cashflow_value=_optional_float(row.get("spy_same_cashflow_value")),

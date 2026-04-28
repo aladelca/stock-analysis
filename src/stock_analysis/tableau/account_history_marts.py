@@ -1,19 +1,60 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
 from stock_analysis.forecasting.outcomes import attach_forecast_outcomes
 from stock_analysis.storage.contracts import (
     AccountTrackingRepository,
+    CashflowRecord,
     HoldingSnapshotRecord,
+    PerformanceSnapshotRecord,
     PortfolioSnapshotRecord,
+    RecommendationLineRecord,
     RecommendationRunRecord,
 )
+
+HISTORY_COLUMNS: dict[str, list[str]] = {
+    "cashflows_history": [
+        *[field.name for field in fields(CashflowRecord)],
+        "account_slug",
+    ],
+    "portfolio_snapshots_history": [
+        *[field.name for field in fields(PortfolioSnapshotRecord)],
+        "account_slug",
+    ],
+    "holding_snapshots_history": [
+        *[field.name for field in fields(HoldingSnapshotRecord)],
+        "account_id",
+        "snapshot_date",
+        "account_slug",
+    ],
+    "recommendation_runs_history": [
+        *[field.name for field in fields(RecommendationRunRecord)],
+        "account_slug",
+    ],
+    "recommendation_lines_history": [
+        *[field.name for field in fields(RecommendationLineRecord)],
+        "account_id",
+        "run_id",
+        "run_requested_as_of_date",
+        "run_data_as_of_date",
+        "model_version",
+        "ml_score_scale",
+        "config_hash",
+        "run_expected_return_is_calibrated",
+        "run_status",
+        "account_slug",
+    ],
+    "performance_snapshots_history": [
+        *[field.name for field in fields(PerformanceSnapshotRecord)],
+        "account_slug",
+    ],
+}
 
 
 def build_account_history_marts(
@@ -52,13 +93,12 @@ def build_account_history_marts(
         "recommendation_lines_history": lines,
         "performance_snapshots_history": performance,
     }
-    non_empty: dict[str, pd.DataFrame] = {}
+    result: dict[str, pd.DataFrame] = {}
     for name, table in tables.items():
-        if table.empty:
-            continue
-        table["account_slug"] = account.slug
-        non_empty[name] = table
-    return non_empty
+        prepared = table.copy()
+        prepared["account_slug"] = account.slug
+        result[name] = _ensure_columns(prepared, HISTORY_COLUMNS[name])
+    return result
 
 
 def _recommendation_lines_history_frame(
@@ -81,6 +121,7 @@ def _recommendation_lines_history_frame(
             "id": "recommendation_run_id",
             "as_of_date": "run_requested_as_of_date",
             "data_as_of_date": "run_data_as_of_date",
+            "expected_return_is_calibrated": "run_expected_return_is_calibrated",
             "status": "run_status",
         }
     )
@@ -95,6 +136,7 @@ def _recommendation_lines_history_frame(
                 "model_version",
                 "ml_score_scale",
                 "config_hash",
+                "run_expected_return_is_calibrated",
                 "run_status",
             ]
         ],
@@ -107,6 +149,19 @@ def _recommendation_lines_history_frame(
     else:
         merged["forecast_start_date"] = merged["forecast_start_date"].fillna(
             merged["run_data_as_of_date"]
+        )
+    if "forecast_score" not in merged.columns:
+        merged["forecast_score"] = merged["expected_return"]
+    else:
+        merged["forecast_score"] = merged["forecast_score"].fillna(merged["expected_return"])
+    if "expected_return_is_calibrated" not in merged.columns:
+        merged["expected_return_is_calibrated"] = _bool_series(
+            merged["run_expected_return_is_calibrated"]
+        )
+    else:
+        merged["expected_return_is_calibrated"] = _bool_series(
+            merged["expected_return_is_calibrated"]
+            .combine_first(merged["run_expected_return_is_calibrated"])
         )
     return attach_forecast_outcomes(
         merged,
@@ -158,3 +213,23 @@ def _record_dict(record: Any) -> dict[str, object]:
         if isinstance(value, date):
             payload[key] = value.isoformat()
     return payload
+
+
+def _ensure_columns(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    result = frame.copy()
+    for column in columns:
+        if column not in result.columns:
+            result[column] = pd.NA
+    return result[columns]
+
+
+def _bool_series(series: pd.Series) -> pd.Series:
+    return series.map(_bool_value)
+
+
+def _bool_value(value: object) -> bool:
+    if pd.isna(cast(Any, value)):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y"}
+    return bool(value)

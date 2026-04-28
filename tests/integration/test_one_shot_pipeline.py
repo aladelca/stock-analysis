@@ -159,6 +159,7 @@ def test_export_existing_run_for_tableau_includes_account_history(
     sample_config.live_account.account_slug = "main"
     sample_config.live_account.cashflow_source = "actual"
     repository = FakeAccountTrackingRepository()
+    repository.cashflows = []
     historical_run = RecommendationRunRecord(
         id="historical-run-id",
         account_id="account-1",
@@ -176,6 +177,7 @@ def test_export_existing_run_for_tableau_includes_account_history(
             recommendation_run_id=historical_run.id or "",
             ticker="AAA",
             action="BUY",
+            forecast_score=0.01,
             expected_return=0.01,
             target_weight=0.2,
         )
@@ -194,6 +196,7 @@ def test_export_existing_run_for_tableau_includes_account_history(
     )
 
     assert "gold.recommendation_lines_history.csv" in outputs
+    assert "gold.cashflows_history.csv" in outputs
     history = pd.read_parquet(
         sample_config.run.output_root
         / "runs"
@@ -204,8 +207,14 @@ def test_export_existing_run_for_tableau_includes_account_history(
     assert set(history["run_id"]) == {"historical-run", "test-run"}
     historical = history.loc[history["run_id"].eq("historical-run")].iloc[0]
     assert historical["outcome_status"] == "realized"
+    assert historical["forecast_score"] == pytest.approx(0.01)
     assert historical["forecast_horizon_days"] == 5
     assert pd.notna(historical["realized_return"])
+    cashflows_history = pd.read_parquet(
+        sample_config.run.output_root / "runs" / "test-run" / "gold" / "cashflows_history.parquet"
+    )
+    assert cashflows_history.empty
+    assert "account_slug" in cashflows_history.columns
 
 
 def test_export_existing_run_for_tableau_does_not_rerun_pipeline(

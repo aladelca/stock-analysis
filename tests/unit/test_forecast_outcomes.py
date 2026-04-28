@@ -13,6 +13,8 @@ def test_attach_forecast_outcomes_marks_realized_after_horizon() -> None:
                 "ticker": "AAA",
                 "as_of_date": "2026-01-02",
                 "expected_return": 0.02,
+                "calibrated_expected_return": 0.02,
+                "expected_return_is_calibrated": True,
             }
         ]
     )
@@ -58,7 +60,7 @@ def test_attach_forecast_outcomes_marks_realized_after_horizon() -> None:
 
 def test_attach_forecast_outcomes_marks_pending_without_future_prices() -> None:
     recommendations = pd.DataFrame(
-        [{"ticker": "AAA", "as_of_date": "2026-01-02", "expected_return": 0.02}]
+        [{"ticker": "AAA", "as_of_date": "2026-01-02", "forecast_score": 0.02}]
     )
     prices = pd.DataFrame(
         [
@@ -75,6 +77,44 @@ def test_attach_forecast_outcomes_marks_pending_without_future_prices() -> None:
     )
 
     row = result.iloc[0]
-    assert pd.isna(row["forecast_end_date"])
+    assert row["forecast_end_date"] == "2026-01-09"
     assert pd.isna(row["realized_return"])
     assert row["outcome_status"] == "pending"
+
+
+def test_attach_forecast_outcomes_does_not_error_uncalibrated_scores() -> None:
+    recommendations = pd.DataFrame(
+        [
+            {
+                "ticker": "AAA",
+                "as_of_date": "2026-01-02",
+                "forecast_score": 2.0,
+                "expected_return": 2.0,
+                "expected_return_is_calibrated": False,
+            }
+        ]
+    )
+    prices = pd.DataFrame(
+        [
+            *[
+                {
+                    "ticker": "AAA",
+                    "date": date.date().isoformat(),
+                    "adj_close": 100 + index,
+                }
+                for index, date in enumerate(pd.bdate_range("2026-01-02", periods=7))
+            ],
+        ]
+    )
+
+    result = attach_forecast_outcomes(
+        recommendations,
+        prices,
+        horizon_days=5,
+        run_data_as_of_date="2026-01-02",
+    )
+
+    row = result.iloc[0]
+    assert row["outcome_status"] == "realized"
+    assert pd.isna(row["forecast_error"])
+    assert bool(row["forecast_hit"]) is True

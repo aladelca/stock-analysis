@@ -19,7 +19,9 @@ def test_recommendation_outputs() -> None:
             "ticker": ["AAA", "BBB"],
             "security": ["AAA Corp", "BBB Inc"],
             "gics_sector": ["Technology", "Health Care"],
+            "forecast_score": [1.0, 2.0],
             "expected_return": [0.1, 0.2],
+            "expected_return_is_calibrated": [False, False],
             "volatility": [0.2, 0.3],
             "eligible_for_optimization": [True, True],
         }
@@ -49,6 +51,8 @@ def test_recommendation_outputs() -> None:
         "rebalance_required",
     } <= set(recommendations.columns)
     assert set(recommendations["action"]) == {"BUY", "SELL", "HOLD"}
+    assert recommendations.set_index("ticker").loc["AAA", "forecast_score"] == pytest.approx(1.0)
+    assert pd.isna(recommendations.set_index("ticker").loc["AAA", "calibrated_expected_return"])
     zzz = recommendations.set_index("ticker").loc["ZZZ"]
     assert zzz["action"] == "SELL"
     assert zzz["trade_weight"] == pytest.approx(-0.05)

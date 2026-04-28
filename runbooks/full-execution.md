@@ -250,15 +250,19 @@ data/runs/$RUN_ID/gold/csv/portfolio_recommendations.csv
 
 Live Supabase-backed runs also produce account-tracking outputs. `recommendation_lines`
 and `portfolio_dashboard_mart` include forecast horizon outcome columns such as
+`forecast_score`, `expected_return_is_calibrated`, `calibrated_expected_return`,
 `forecast_horizon_days`, `forecast_start_date`, `forecast_end_date`, `realized_return`,
 `realized_spy_return`, `realized_active_return`, `forecast_error`, `forecast_hit`, and
-`outcome_status`.
+`outcome_status`. `forecast_error` is populated only for calibrated return forecasts; the
+current ML model's uncalibrated `forecast_score` should be visualized as a score/ranking signal.
 
 For historical Tableau dashboards, run `export-tableau` after the one-shot run. When
 `live_account.enabled=true` and Supabase credentials are available, the export adds full-account
-history tables including `recommendation_runs_history`, `recommendation_lines_history`, and
-`performance_snapshots_history`. Use the `_history` tables for trend charts and forecast-vs-realized
-views; use the single-run tables for the current recommendation screen.
+history tables including `cashflows_history`, `recommendation_runs_history`,
+`recommendation_lines_history`, and `performance_snapshots_history`. Use the `_history` tables for
+trend charts and forecast-vs-realized views; use the single-run tables for the current
+recommendation screen. Empty history tables are still exported with stable column names so Tableau
+extracts keep the same shape across refreshes.
 
 MLflow outputs, when enabled:
 

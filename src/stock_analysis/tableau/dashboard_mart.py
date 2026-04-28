@@ -4,6 +4,8 @@ import pandas as pd
 
 from stock_analysis.tableau.account_tracking_marts import latest_performance_fields
 
+DASHBOARD_WEIGHT_EPSILON = 1e-8
+
 
 def build_dashboard_mart(
     recommendations: pd.DataFrame,
@@ -22,8 +24,28 @@ def build_dashboard_mart(
         else {}
     )
 
-    mart["selected"] = pd.to_numeric(mart["target_weight"], errors="coerce").fillna(0.0).gt(0)
-    mart["forecast_score"] = mart["expected_return"]
+    if "forecast_score" not in mart.columns:
+        mart["forecast_score"] = mart["expected_return"]
+    if "expected_return_is_calibrated" not in mart.columns:
+        mart["expected_return_is_calibrated"] = False
+    if "calibrated_expected_return" not in mart.columns:
+        mart["calibrated_expected_return"] = pd.NA
+    target_weight = pd.to_numeric(mart["target_weight"], errors="coerce").fillna(0.0)
+    current_weight = pd.to_numeric(mart["current_weight"], errors="coerce").fillna(0.0)
+    trade_weight = pd.to_numeric(mart["trade_weight"], errors="coerce").fillna(0.0)
+    mart["is_solver_dust"] = target_weight.abs().gt(0) & target_weight.abs().lt(
+        DASHBOARD_WEIGHT_EPSILON
+    )
+    mart["display_target_weight"] = target_weight.mask(mart["is_solver_dust"], 0.0)
+    mart["display_current_weight"] = current_weight.mask(
+        current_weight.abs().lt(DASHBOARD_WEIGHT_EPSILON),
+        0.0,
+    )
+    mart["display_trade_weight"] = trade_weight.mask(
+        trade_weight.abs().lt(DASHBOARD_WEIGHT_EPSILON),
+        0.0,
+    )
+    mart["selected"] = mart["display_target_weight"].gt(0)
     mart["target_weight_label"] = mart["target_weight"].map(lambda value: f"{float(value):.2%}")
     mart["current_weight_label"] = mart["current_weight"].map(lambda value: f"{float(value):.2%}")
     mart["trade_weight_label"] = mart["trade_weight"].map(lambda value: f"{float(value):+.2%}")
@@ -32,7 +54,7 @@ def build_dashboard_mart(
     )
     mart["trade_notional_label"] = mart["trade_notional"].map(_currency_label)
     mart["commission_amount_label"] = mart["commission_amount"].map(_currency_label)
-    mart["scatter_size"] = mart["target_weight"].where(mart["selected"], 0.001)
+    mart["scatter_size"] = mart["display_target_weight"].where(mart["selected"], 0.001)
 
     for column, metric_value in risk_wide.items():
         mart[f"portfolio_{column}"] = metric_value
@@ -73,6 +95,8 @@ def build_dashboard_mart(
         "security",
         "gics_sector",
         "forecast_score",
+        "expected_return_is_calibrated",
+        "calibrated_expected_return",
         "forecast_horizon_days",
         "forecast_start_date",
         "forecast_end_date",
@@ -84,10 +108,13 @@ def build_dashboard_mart(
         "outcome_status",
         "volatility",
         "current_weight",
+        "display_current_weight",
         "current_weight_label",
         "target_weight",
+        "display_target_weight",
         "target_weight_label",
         "trade_weight",
+        "display_trade_weight",
         "trade_abs_weight",
         "trade_weight_label",
         "rebalance_required",
@@ -108,6 +135,7 @@ def build_dashboard_mart(
         "deposit_used_amount",
         "cash_after_trade_amount",
         "no_trade_band_applied",
+        "is_solver_dust",
         "selected",
         "scatter_size",
         "action",
@@ -120,8 +148,11 @@ def build_dashboard_mart(
         "portfolio_max_weight",
         "portfolio_concentration_hhi",
         "account_total_value",
+        "account_initial_value",
         "account_total_deposits",
+        "account_invested_capital",
         "account_net_external_cashflow",
+        "account_return_on_invested_capital",
         "account_time_weighted_return",
         "account_money_weighted_return",
         "spy_same_cashflow_value",
@@ -143,6 +174,7 @@ def build_dashboard_mart(
         "run_created_at_utc",
         "run_config_hash",
         "run_config_hash_short",
+        "run_expected_return_is_calibrated",
     ]
     for column in column_order:
         if column not in mart.columns:
@@ -175,6 +207,7 @@ def _single_row_metadata(run_metadata: pd.DataFrame) -> dict[str, str]:
             "data_as_of_date",
             "created_at_utc",
             "config_hash",
+            "expected_return_is_calibrated",
             "live_account_enabled",
             "live_account_slug",
             "live_cashflow_source",

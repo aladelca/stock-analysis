@@ -169,6 +169,7 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
             model_version="e8-scale-0p5-contribution-aware-v1",
             ml_score_scale=0.5,
             config_hash="abc123",
+            expected_return_is_calibrated=False,
         )
     )
     lines = repo.insert_recommendation_lines(
@@ -178,6 +179,8 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
                 ticker="SPY",
                 target_weight=0.3,
                 action="BUY",
+                forecast_score=0.2,
+                expected_return=0.2,
                 forecast_horizon_days=5,
                 forecast_start_date=date(2026, 4, 24),
                 outcome_status="pending",
@@ -191,19 +194,56 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
             account_total_value=1000.0,
             total_deposits=500.0,
             net_external_cashflow=500.0,
+            initial_value=500.0,
+            invested_capital=1000.0,
+            return_on_invested_capital=0.0,
             spy_same_cashflow_value=980.0,
         )
     )
 
     assert run.id == "recommendation_runs-1"
+    assert run.expected_return_is_calibrated is False
     assert lines[0].id == "recommendation_lines-1"
+    assert lines[0].forecast_score == pytest.approx(0.2)
     assert lines[0].forecast_horizon_days == 5
     assert lines[0].forecast_start_date == date(2026, 4, 24)
     assert repo.list_recommendation_runs("account-1") == [run]
     assert repo.list_recommendation_lines([run.id or ""]) == lines
     assert performance.id == "performance_snapshots-1"
+    assert performance.initial_value == pytest.approx(500.0)
+    assert performance.invested_capital == pytest.approx(1000.0)
     assert client.tables["performance_snapshots"][0]["as_of_date"] == "2026-04-24"
     assert repo.list_performance_snapshots("account-1") == [performance]
+
+
+def test_repository_paginates_recommendation_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("stock_analysis.storage.supabase.SUPABASE_PAGE_SIZE", 2)
+    client = FakeSupabaseClient()
+    repo = SupabaseAccountTrackingRepository(client, SupabaseConfig())
+    run = repo.insert_recommendation_run(
+        RecommendationRunRecord(
+            account_id="account-1",
+            run_id="run-1",
+            as_of_date=date(2026, 4, 24),
+            data_as_of_date=date(2026, 4, 24),
+            model_version="model",
+            ml_score_scale=1.0,
+            config_hash="abc123",
+        )
+    )
+    repo.insert_recommendation_lines(
+        [
+            RecommendationLineRecord(
+                recommendation_run_id=run.id or "",
+                ticker=f"T{index}",
+            )
+            for index in range(5)
+        ]
+    )
+
+    lines = repo.list_recommendation_lines([run.id or ""])
+
+    assert [line.ticker for line in lines] == ["T0", "T1", "T2", "T3", "T4"]
 
 
 @dataclass
@@ -229,6 +269,7 @@ class FakeQuery:
         self.filters: list[tuple[str, str, Any]] = []
         self.orders: list[tuple[str, bool]] = []
         self.row_limit: int | None = None
+        self.row_range: tuple[int, int] | None = None
         self.on_conflict: str | None = None
 
     def select(self, _columns: str) -> FakeQuery:
@@ -277,6 +318,10 @@ class FakeQuery:
 
     def limit(self, row_limit: int) -> FakeQuery:
         self.row_limit = row_limit
+        return self
+
+    def range(self, start: int, end: int) -> FakeQuery:
+        self.row_range = (start, end)
         return self
 
     def execute(self) -> FakeResponse:
@@ -341,6 +386,9 @@ class FakeQuery:
             rows = sorted(rows, key=lambda row: row.get(column), reverse=desc)
         if self.row_limit is not None:
             rows = rows[: self.row_limit]
+        if self.row_range is not None:
+            start, end = self.row_range
+            rows = rows[start : end + 1]
         return rows
 
     def _table(self) -> list[dict[str, Any]]:

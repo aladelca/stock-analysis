@@ -26,16 +26,42 @@
       <column datatype="string" name="[security]" role="dimension" type="nominal" caption="Security"/>
       <column datatype="string" name="[gics_sector]" role="dimension" type="nominal" caption="GICS Sector"/>
       <column datatype="real" name="[forecast_score]" role="measure" type="quantitative" caption="Forecast Score"/>
+      <column datatype="boolean" name="[expected_return_is_calibrated]" role="dimension" type="nominal" caption="Expected Return Is Calibrated"/>
+      <column datatype="real" name="[calibrated_expected_return]" role="measure" type="quantitative" caption="Calibrated Expected Return"/>
+      <column datatype="integer" name="[forecast_horizon_days]" role="dimension" type="nominal" caption="Forecast Horizon Days"/>
+      <column datatype="date" name="[forecast_start_date]" role="dimension" type="nominal" caption="Forecast Start Date"/>
+      <column datatype="date" name="[forecast_end_date]" role="dimension" type="nominal" caption="Forecast End Date"/>
+      <column datatype="real" name="[realized_return]" role="measure" type="quantitative" caption="Realized Return"/>
+      <column datatype="real" name="[realized_spy_return]" role="measure" type="quantitative" caption="Realized SPY Return"/>
+      <column datatype="real" name="[realized_active_return]" role="measure" type="quantitative" caption="Realized Active Return"/>
+      <column datatype="real" name="[forecast_error]" role="measure" type="quantitative" caption="Forecast Error"/>
+      <column datatype="boolean" name="[forecast_hit]" role="dimension" type="nominal" caption="Forecast Hit"/>
+      <column datatype="string" name="[outcome_status]" role="dimension" type="nominal" caption="Outcome Status"/>
       <column datatype="real" name="[volatility]" role="measure" type="quantitative" caption="Volatility"/>
       <column datatype="real" name="[target_weight]" role="measure" type="quantitative" caption="Target Weight"/>
+      <column datatype="real" name="[display_target_weight]" role="measure" type="quantitative" caption="Display Target Weight"/>
       <column datatype="real" name="[current_weight]" role="measure" type="quantitative" caption="Current Weight"/>
+      <column datatype="real" name="[display_current_weight]" role="measure" type="quantitative" caption="Display Current Weight"/>
       <column datatype="real" name="[trade_weight]" role="measure" type="quantitative" caption="Trade Weight"/>
+      <column datatype="real" name="[display_trade_weight]" role="measure" type="quantitative" caption="Display Trade Weight"/>
       <column datatype="real" name="[trade_abs_weight]" role="measure" type="quantitative" caption="Trade Abs Weight"/>
       <column datatype="boolean" name="[rebalance_required]" role="dimension" type="nominal" caption="Rebalance Required"/>
       <column datatype="real" name="[estimated_commission_weight]" role="measure" type="quantitative" caption="Estimated Commission Weight"/>
       <column datatype="real" name="[net_trade_weight_after_commission]" role="measure" type="quantitative" caption="Net Trade Weight After Commission"/>
       <column datatype="real" name="[cash_required_weight]" role="measure" type="quantitative" caption="Cash Required Weight"/>
       <column datatype="real" name="[cash_released_weight]" role="measure" type="quantitative" caption="Cash Released Weight"/>
+      <column datatype="real" name="[portfolio_value_after_contribution]" role="measure" type="quantitative" caption="Portfolio Value After Contribution"/>
+      <column datatype="real" name="[contribution_amount]" role="measure" type="quantitative" caption="Contribution Amount"/>
+      <column datatype="real" name="[current_market_value]" role="measure" type="quantitative" caption="Current Market Value"/>
+      <column datatype="real" name="[target_market_value]" role="measure" type="quantitative" caption="Target Market Value"/>
+      <column datatype="real" name="[trade_notional]" role="measure" type="quantitative" caption="Trade Notional"/>
+      <column datatype="real" name="[commission_amount]" role="measure" type="quantitative" caption="Commission Amount"/>
+      <column datatype="real" name="[deposit_used_amount]" role="measure" type="quantitative" caption="Deposit Used Amount"/>
+      <column datatype="real" name="[cash_after_trade_amount]" role="measure" type="quantitative" caption="Cash After Trade Amount"/>
+      <column datatype="boolean" name="[no_trade_band_applied]" role="dimension" type="nominal" caption="No Trade Band Applied"/>
+      <column datatype="boolean" name="[is_solver_dust]" role="dimension" type="nominal" caption="Solver Dust"/>
+      <column datatype="string" name="[trade_notional_label]" role="dimension" type="nominal" caption="Trade Notional Label"/>
+      <column datatype="string" name="[commission_amount_label]" role="dimension" type="nominal" caption="Commission Amount Label"/>
       <column datatype="string" name="[current_weight_label]" role="dimension" type="nominal" caption="Current Weight Label"/>
       <column datatype="string" name="[target_weight_label]" role="dimension" type="nominal" caption="Target Weight Label"/>
       <column datatype="string" name="[trade_weight_label]" role="dimension" type="nominal" caption="Trade Weight Label"/>
@@ -51,6 +77,11 @@
       <column datatype="integer" name="[portfolio_num_holdings]" role="measure" type="quantitative" caption="# Holdings"/>
       <column datatype="real" name="[portfolio_max_weight]" role="measure" type="quantitative" caption="Max Weight"/>
       <column datatype="real" name="[portfolio_concentration_hhi]" role="measure" type="quantitative" caption="Concentration HHI"/>
+      <column datatype="real" name="[account_total_value]" role="measure" type="quantitative" caption="Account Total Value"/>
+      <column datatype="real" name="[account_initial_value]" role="measure" type="quantitative" caption="Account Initial Value"/>
+      <column datatype="real" name="[account_total_deposits]" role="measure" type="quantitative" caption="Account Total Deposits"/>
+      <column datatype="real" name="[account_invested_capital]" role="measure" type="quantitative" caption="Account Invested Capital"/>
+      <column datatype="real" name="[account_return_on_invested_capital]" role="measure" type="quantitative" caption="Account Return On Invested Capital"/>
       <column datatype="date" name="[run_requested_as_of_date]" role="dimension" type="nominal" caption="Requested Data Date"/>
       <column datatype="date" name="[run_data_as_of_date]" role="dimension" type="nominal" caption="Market Data Date"/>
       <column datatype="boolean" name="[is_data_date_lagged]" role="dimension" type="nominal" caption="Data Date Lagged"/>
@@ -58,20 +89,21 @@
       <column datatype="string" name="[run_created_at_utc]" role="dimension" type="nominal" caption="Run Created At UTC"/>
       <column datatype="string" name="[run_config_hash]" role="dimension" type="nominal" caption="Run Config Hash"/>
       <column datatype="string" name="[run_config_hash_short]" role="dimension" type="nominal" caption="Config Hash"/>
+      <column datatype="string" name="[run_expected_return_is_calibrated]" role="dimension" type="nominal" caption="Run Expected Return Is Calibrated"/>
       <column datatype="string" name="[portfolio_footer_label]" role="dimension" type="nominal" caption="Portfolio Footer Label">
         <calculation class="tableau" formula="&quot;Run &quot; + STR([run_id]) + &quot; | requested &quot; + STR([run_requested_as_of_date]) + &quot; | data &quot; + STR([run_data_as_of_date]) + &quot; | &quot; + STR([data_date_status]) + &quot; | config &quot; + STR([run_config_hash_short])"/>
       </column>
       <column datatype="string" name="[holding_ticker]" role="dimension" type="nominal" caption="Holding Ticker">
-        <calculation class="tableau" formula="IF [target_weight] &gt; 0 THEN [ticker] END"/>
+        <calculation class="tableau" formula="IF [selected] THEN [ticker] END"/>
       </column>
       <column datatype="string" name="[holding_security]" role="dimension" type="nominal" caption="Holding Security">
-        <calculation class="tableau" formula="IF [target_weight] &gt; 0 THEN [security] END"/>
+        <calculation class="tableau" formula="IF [selected] THEN [security] END"/>
       </column>
       <column datatype="real" name="[holding_weight]" role="measure" type="quantitative" caption="Holding Weight">
-        <calculation class="tableau" formula="IF [target_weight] &gt; 0 THEN [target_weight] END"/>
+        <calculation class="tableau" formula="IF [selected] THEN [display_target_weight] END"/>
       </column>
       <column datatype="string" name="[holding_weight_label]" role="dimension" type="nominal" caption="Holding Weight Label">
-        <calculation class="tableau" formula="IF [target_weight] &gt; 0 THEN [target_weight_label] END"/>
+        <calculation class="tableau" formula="IF [selected] THEN [target_weight_label] END"/>
       </column>
       <column datatype="string" name="[trade_ticker]" role="dimension" type="nominal" caption="Trade Ticker">
         <calculation class="tableau" formula="IF [rebalance_required] THEN [ticker] END"/>
@@ -315,16 +347,16 @@
           <datasource-dependencies datasource="federated.portfolio_dashboard_mart">
             <column datatype="string" name="[gics_sector]" role="dimension" type="nominal" caption="GICS Sector"/>
             <column datatype="string" name="[holding_security]" role="dimension" type="nominal" caption="Holding Security">
-              <calculation class="tableau" formula="IF [target_weight] &gt; 0 THEN [security] END"/>
+              <calculation class="tableau" formula="IF [selected] THEN [security] END"/>
             </column>
             <column datatype="string" name="[holding_ticker]" role="dimension" type="nominal" caption="Holding Ticker">
-              <calculation class="tableau" formula="IF [target_weight] &gt; 0 THEN [ticker] END"/>
+              <calculation class="tableau" formula="IF [selected] THEN [ticker] END"/>
             </column>
             <column datatype="real" name="[holding_weight]" role="measure" type="quantitative" caption="Holding Weight">
-              <calculation class="tableau" formula="IF [target_weight] &gt; 0 THEN [target_weight] END"/>
+              <calculation class="tableau" formula="IF [selected] THEN [display_target_weight] END"/>
             </column>
             <column datatype="string" name="[holding_weight_label]" role="dimension" type="nominal" caption="Holding Weight Label">
-              <calculation class="tableau" formula="IF [target_weight] &gt; 0 THEN [target_weight_label] END"/>
+              <calculation class="tableau" formula="IF [selected] THEN [target_weight_label] END"/>
             </column>
             <column datatype="string" name="[reason_code]" role="dimension" type="nominal" caption="Reason Code"/>
             <column-instance column="[holding_ticker]" derivation="None" name="[none:holding_ticker:nk]" pivot="key" type="nominal"/>

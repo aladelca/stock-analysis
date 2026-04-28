@@ -122,6 +122,9 @@ def test_portfolio_workbook_uses_expected_fields_and_calculation(tmp_path: Path)
     field_names = {node.attrib["name"] for node in datasource.findall("./column")}
     assert "[target_weight]" in field_names
     assert "[forecast_score]" in field_names
+    assert "[calibrated_expected_return]" in field_names
+    assert "[display_target_weight]" in field_names
+    assert "[account_initial_value]" in field_names
     assert "[portfolio_footer_label]" in field_names
     assert "[holding_ticker]" in field_names
     assert "[holding_weight]" in field_names
@@ -138,7 +141,8 @@ def test_portfolio_workbook_uses_expected_fields_and_calculation(tmp_path: Path)
 
     holding_calc = datasource.find("./column[@name='[holding_weight]']/calculation")
     assert holding_calc is not None
-    assert "[target_weight] > 0" in holding_calc.attrib["formula"]
+    assert "[selected]" in holding_calc.attrib["formula"]
+    assert "[display_target_weight]" in holding_calc.attrib["formula"]
 
     trade_calc = datasource.find("./column[@name='[trade_ticker]']/calculation")
     assert trade_calc is not None
