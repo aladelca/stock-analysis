@@ -63,11 +63,11 @@ forecast:
 optimizer:
   max_weight: 0.24
   benchmark_candidate_max_weight: 1.0
-  risk_aversion: 10.0
+  risk_aversion: 4.0
   min_trade_weight: 0.005
   min_rebalance_trade_weight: 0.005
-  lambda_turnover: 5.0
-  commission_rate: 0.02
+  lambda_turnover: 0.005
+  commission_rate: 0.002
   sector_max_weight: 0.35
   max_trade_abs_weight: null
   preserve_outside_holdings: true
@@ -86,7 +86,7 @@ contributions:
 
 execution:
   cash_balance: 0.0
-  no_trade_band: 0.04
+  no_trade_band: 0.01
 
 live_account:
   enabled: false

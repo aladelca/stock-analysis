@@ -90,8 +90,9 @@ forecast:
 optimizer:
   max_weight: 0.24
   benchmark_candidate_max_weight: 1.0
-  risk_aversion: 10.0
-  commission_rate: 0.02
+  risk_aversion: 4.0
+  lambda_turnover: 0.005
+  commission_rate: 0.002
   min_rebalance_trade_weight: 0.005
   sector_max_weight: 0.35
   preserve_outside_holdings: true
@@ -109,7 +110,7 @@ contributions:
 
 execution:
   cash_balance: 0.0
-  no_trade_band: 0.04
+  no_trade_band: 0.01
 
 mlflow:
   enabled: true
@@ -143,11 +144,14 @@ Notes:
   one-shot run. Backtests and autoresearch still use the monthly deposit assumption when supplied.
 - For live account tracking with arbitrary-date deposits, use the Supabase flow in
   `runbooks/supabase-account-tracking.md` and set `live_account.cashflow_source: actual`.
-- `execution.no_trade_band: 0.04` avoids small trades below 4% of portfolio value.
+- `optimizer.risk_aversion: 4.0`, `optimizer.lambda_turnover: 0.005`, and
+  `execution.no_trade_band: 0.01` make the live profile more willing to rotate when calibrated
+  active returns clear the SPY-relative gate.
+- `execution.no_trade_band: 0.01` avoids small trades below 1% of portfolio value.
 - `optimizer.preserve_outside_holdings: true` keeps current positions outside the optimizer
   universe. SPY is no longer outside the universe by default because it is added as a benchmark ETF
   candidate.
-- `optimizer.commission_rate: 0.02` charges 2% of absolute traded portfolio weight.
+- `optimizer.commission_rate: 0.002` charges 0.2% of absolute traded portfolio weight.
 - `mlflow.enabled: true` logs parameters, recommendation metrics, risk metrics, and gold artifacts.
 - Set `tableau.export_hyper: true` only after installing the Tableau extra.
 
@@ -427,7 +431,9 @@ forecast:
 optimizer:
   max_weight: 0.24
   benchmark_candidate_max_weight: 1.0
-  lambda_turnover: 5.0
+  risk_aversion: 4.0
+  lambda_turnover: 0.005
+  commission_rate: 0.002
   preserve_outside_holdings: true
 
 tableau:
@@ -536,7 +542,9 @@ forecast:
 optimizer:
   max_weight: 0.24
   benchmark_candidate_max_weight: 1.0
-  lambda_turnover: 5.0
+  risk_aversion: 4.0
+  lambda_turnover: 0.005
+  commission_rate: 0.002
   preserve_outside_holdings: true
 
 tableau:

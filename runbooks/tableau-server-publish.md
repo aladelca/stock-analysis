@@ -41,7 +41,9 @@ forecast:
 optimizer:
   max_weight: 0.24
   benchmark_candidate_max_weight: 1.0
-  lambda_turnover: 5.0
+  risk_aversion: 4.0
+  lambda_turnover: 0.005
+  commission_rate: 0.002
   preserve_outside_holdings: true
 
 tableau:
