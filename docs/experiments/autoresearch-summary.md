@@ -148,7 +148,55 @@ than the alternatives. Do not claim a scientifically confirmed SPY beat yet. The
 supports "beats SPY on ending-value point estimates under the tested deposit schedule"; it does not
 support production copy or dashboards that state the model has conclusively beaten SPY.
 
-CatBoost is now available for continued experimentation, but the first CatBoost batches do not
-justify replacing the Ridge plus LightGBM production path. The next highest-value work is a
-cost-aware/deposit-aware model search under the PIT validation contract and a historical constituent
-universe so the validation is not limited to the current S&P 500 membership.
+### 2026-04-28 Cost-Aware PIT Model Search
+
+Follow-up search under the same PIT production-economics contract tested E8 scale/weight variants,
+standalone LightGBM, CatBoost, and PyTorch MLP, LSTM, and Transformer candidates. PyTorch was run
+with `mps` available on the local Apple Silicon environment via the optional `pytorch` extra.
+
+The strongest broad-confirmed candidate was `lightgbm_return_zscore` with `optimizer_max_weight=0.24`,
+`lambda_turnover=5.0`, and `no_trade_band=0.04`.
+
+| Candidate / Setting | Status | Ending Value | SPY Ending Value | Sharpe | SPY Sharpe | SPY-Relative IR | CI Low | Total Commissions |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `lightgbm_return_zscore`, max weight 0.24, band 0.04 | provisional | $19,607.92 | $10,045.59 | 1.686490 | 1.139604 | 1.361028 | -0.078446 | $416.58 |
+| `lightgbm_return_zscore`, max weight 0.25, band 0.04 | provisional | $19,590.57 | $10,045.59 | 1.681303 | 1.139604 | 1.350918 | -0.081831 | $416.17 |
+| `lightgbm_return_zscore`, max weight 0.30, band 0.02 | provisional | $19,514.99 | $10,045.59 | 1.607539 | 1.139604 | 1.310368 | -0.164219 | $371.67 |
+| `catboost_return_zscore` | provisional | $16,997.49 | $10,045.59 | 1.296346 | 1.139604 | 0.883926 | -0.638166 | $498.03 |
+| `catboost_momentum_return_zscore` | provisional | $15,514.11 | $10,045.59 | 1.275287 | 1.139604 | 0.831108 | -0.666697 | $330.03 |
+
+PyTorch MLP fast-screen results did not justify broad confirmation. The best MLP screen was
+`torch_mlp_return_deep_zscore` at 48 requested rebalances, with Sharpe 1.559 versus SPY 1.320 and
+CI low -0.792.
+
+PyTorch LSTM and Transformer candidates were then added as first-class autoresearch candidates. They
+train per-ticker trailing feature windows point-in-time at each rebalance, using `ticker` and `date`
+only to assemble historical windows and not as numeric alpha features. The 48-rebalance screen used
+the current best production-economics optimizer settings: `optimizer_max_weight=0.24`,
+`lambda_turnover=5.0`, 2% commission, $100 monthly deposits, and `no_trade_band=0.04`.
+
+| Neural Sequence Candidate / Setting | Scope | Status | Ending Value | SPY Ending Value | Sharpe | SPY Sharpe | SPY-Relative IR | CI Low |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `torch_lstm_momentum_return_zscore`, max weight 0.24, band 0.04 | broad 241 | provisional | $14,371.04 | $10,045.59 | 1.375979 | 1.139604 | 0.851981 | -0.333648 |
+| `torch_lstm_momentum_return_zscore`, max weight 0.24, band 0.04 | fast 48 | provisional | $6,982.64 | $6,115.11 | 1.635387 | 1.320164 | 0.801520 | -0.709346 |
+| `torch_lstm_return_zscore`, max weight 0.24, band 0.04 | fast 48 | provisional | $6,729.69 | $6,115.11 | 1.407835 | 1.320164 | 0.663765 | -0.795821 |
+| `torch_lstm_return_deep_zscore`, max weight 0.24, band 0.04 | fast 48 | provisional | $6,766.21 | $6,115.11 | 1.374672 | 1.320164 | 0.738616 | -0.724888 |
+| `torch_transformer_return_zscore`, max weight 0.24, band 0.04 | fast 48 | rejected | $6,740.75 | $6,115.11 | 1.240219 | 1.320164 | 0.201597 | -0.976523 |
+| `torch_transformer_return_deep_zscore`, max weight 0.24, band 0.04 | fast 48 | rejected | $6,434.21 | $6,115.11 | 1.005355 | 1.320164 | -0.107549 | -0.988385 |
+| `torch_transformer_momentum_return_zscore`, max weight 0.24, band 0.04 | fast 48 | rejected | $6,521.72 | $6,115.11 | 1.023103 | 1.320164 | -0.034211 | -0.963996 |
+
+The best neural sequence model beats SPY on broad point estimates, but it does not beat the current
+LightGBM candidate. The apples-to-apples 48-rebalance LightGBM check with max weight 0.24 and band
+0.04 produced Sharpe 2.097 versus SPY 1.320 and SPY-relative IR 1.594. The broad LightGBM candidate
+also remains stronger: Sharpe 1.686, IR 1.361, ending value $19,607.92, and CI low -0.078.
+
+Decision: `lightgbm_return_zscore` with max weight 0.24 and no-trade band 0.04 is the new best
+researched candidate on point estimates. It still does not clear the strict bootstrap gate, so the
+status remains `provisional`. The product should not claim "we beat SPY" as a statistically confirmed
+statement yet. Do not promote the LSTM or Transformer models to production. They are useful research
+baselines, but the evidence says the better model is still the simpler LightGBM return regressor under
+the cost-aware PIT contract.
+
+The next highest-value model work is a stronger validation design, including historical constituent
+membership and a longer out-of-sample window. After that, revisit model complexity with sequence
+ensembles only if they add incremental rank information over LightGBM after transaction costs.

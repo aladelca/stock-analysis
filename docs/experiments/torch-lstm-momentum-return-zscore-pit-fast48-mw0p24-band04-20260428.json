@@ -1,0 +1,126 @@
+{
+  "baseline": {
+    "active_return": 0.636036,
+    "candidate_id": "phase2_e8_final",
+    "candidate_sharpe": 2.987197,
+    "information_ratio": 2.212435,
+    "sharpe_diff": 1.856512,
+    "sharpe_diff_ci_high": 1.5416748795037905,
+    "sharpe_diff_ci_low": -0.4455413268214286,
+    "spy_sharpe": 1.130685
+  },
+  "candidate": {
+    "candidate_id": "torch_lstm_momentum_return_zscore",
+    "description": "PyTorch LSTM return regression using momentum, rank, and return features.",
+    "feature_columns": [
+      "momentum_21d",
+      "momentum_63d",
+      "momentum_126d",
+      "momentum_252d",
+      "momentum_21d_rank",
+      "momentum_63d_rank",
+      "momentum_126d_rank",
+      "momentum_252d_rank",
+      "return_5d",
+      "return_21d",
+      "return_21d_excess"
+    ],
+    "model_kind": "torch_lstm_regression",
+    "training_target_column": null
+  },
+  "config": {
+    "commission_rate": 0.02,
+    "cost_bps": 5.0,
+    "covariance_lookback_days": 252,
+    "deposit_frequency_days": 30,
+    "deposit_start_date": null,
+    "embargo_days": 15,
+    "horizon_days": 5,
+    "initial_portfolio_value": 1000.0,
+    "input_run_root": "data/runs/phase2-source-20260424",
+    "lambda_turnover": 5.0,
+    "max_assets": 100,
+    "max_rebalances": 48,
+    "max_trade_abs_weight": null,
+    "min_trade_weight": 0.005,
+    "monthly_deposit_amount": 100.0,
+    "no_trade_band": 0.04,
+    "optimizer_max_weight": 0.24,
+    "rebalance_on_deposit_day": true,
+    "rebalance_step_days": 5,
+    "risk_aversion": 10.0
+  },
+  "decision": {
+    "notes": "candidate beats SPY on point estimates but CI lower bound is not positive",
+    "objective_improved": false,
+    "passed_spy_gate": true,
+    "status": "provisional"
+  },
+  "git_commit": "190daa40ce8a08dae167355b29a35c27e7668494",
+  "iteration_id": "torch-lstm-momentum-return-zscore-pit-fast48-mw0p24-band04-20260428",
+  "metrics": {
+    "benchmark_relative": {
+      "active_return": 0.11614858000426968,
+      "active_return_period": 0.0023229716000853938,
+      "alpha": 0.12903733390756142,
+      "benchmark_mean_return_period": 0.00354310946791074,
+      "beta": 0.9272460869751682,
+      "information_ratio": 0.8015198039783683,
+      "observations": 46.0,
+      "portfolio_mean_return_period": 0.005866081067996133,
+      "tracking_error": 0.14491043069399237,
+      "tracking_error_period": 0.020493429641677045
+    },
+    "cashflow": {
+      "active_ending_value": 867.5287872225672,
+      "active_time_weighted_return": 0.17949501729939832,
+      "benchmark_commission_to_deposit_ratio": 0.02425531914893617,
+      "benchmark_ending_value": 6115.107891768116,
+      "benchmark_money_weighted_return": 0.03144243458512806,
+      "benchmark_time_weighted_return": 0.10784344310121297,
+      "benchmark_total_commissions": 114.0,
+      "benchmark_total_deposits": 4700.0,
+      "benchmark_total_return_on_invested_capital": 0.07282594592423086,
+      "strategy_commission_to_deposit_ratio": 0.03992619767337098,
+      "strategy_ending_value": 6982.636678990683,
+      "strategy_money_weighted_return": 0.09162728546959281,
+      "strategy_time_weighted_return": 0.2873384604006113,
+      "strategy_total_commissions": 187.6531290648436,
+      "strategy_total_deposits": 4700.0,
+      "strategy_total_return_on_invested_capital": 0.22502397877029523
+    },
+    "comparison": {
+      "active_return": 0.11614858000426968,
+      "annualized_return": 0.3159253216410094,
+      "candidate_sharpe": 1.6353865626090425,
+      "information_ratio": 0.8015198039783683,
+      "ir_observations": 46.0,
+      "max_drawdown": -0.07849371141165229,
+      "mean_turnover": 0.03905593998926505,
+      "sharpe_diff": 0.31522269173771567,
+      "sharpe_diff_ci_high": 0.9490351919123109,
+      "sharpe_diff_ci_low": -0.7093463265137596,
+      "spy_sharpe": 1.3201638708713268,
+      "tracking_error": 0.14491043069399237
+    },
+    "portfolio": {
+      "annualized_return": 0.3159253216410094,
+      "annualized_volatility": 0.19318082272670287,
+      "calmar": 4.024848818578232,
+      "deflated_sharpe_ratio": 1.6353865626090425,
+      "hit_rate": 0.5652173913043478,
+      "max_drawdown": -0.07849371141165229,
+      "sharpe": 1.6353865626090425
+    },
+    "spy": {
+      "annualized_return": 0.1824446695458226,
+      "annualized_volatility": 0.1381985021491359,
+      "calmar": 2.9164170342267464,
+      "deflated_sharpe_ratio": 1.3201638708713268,
+      "hit_rate": 0.6304347826086957,
+      "max_drawdown": -0.06255781234462432,
+      "sharpe": 1.3201638708713268
+    }
+  },
+  "timestamp_utc": "2026-04-28T16:26:09.657354+00:00"
+}

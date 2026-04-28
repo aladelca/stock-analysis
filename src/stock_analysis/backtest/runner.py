@@ -273,8 +273,10 @@ def _prepare_dates(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _select_features(frame: pd.DataFrame, config: BacktestConfig) -> pd.DataFrame:
+    id_columns = [column for column in ("ticker", "date") if column in frame.columns]
     if config.feature_columns:
-        return frame.loc[:, list(config.feature_columns)]
+        feature_columns = [column for column in config.feature_columns if column not in id_columns]
+        return frame.loc[:, [*id_columns, *feature_columns]]
     excluded = {
         "ticker",
         "date",
@@ -289,7 +291,7 @@ def _select_features(frame: pd.DataFrame, config: BacktestConfig) -> pd.DataFram
         and not column.startswith("fwd_")
         and pd.api.types.is_numeric_dtype(frame[column])
     ]
-    return frame[numeric_columns]
+    return frame[[*id_columns, *numeric_columns]]
 
 
 def _limit_features_by_liquidity(frame: pd.DataFrame, config: BacktestConfig) -> pd.DataFrame:

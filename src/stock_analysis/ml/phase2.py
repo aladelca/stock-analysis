@@ -79,6 +79,58 @@ CATBOOST_PARAM_GRID: tuple[dict[str, Any], ...] = (
     },
 )
 
+TORCH_MLP_PARAM_GRID: tuple[dict[str, Any], ...] = (
+    {
+        "hidden_units": 32,
+        "epochs": 8,
+        "batch_size": 4096,
+        "learning_rate": 0.001,
+        "weight_decay": 0.001,
+        "dropout": 0.05,
+        "max_train_rows": 80_000,
+        "device": "auto",
+    },
+    {
+        "hidden_units": 64,
+        "epochs": 12,
+        "batch_size": 4096,
+        "learning_rate": 0.0007,
+        "weight_decay": 0.001,
+        "dropout": 0.10,
+        "max_train_rows": 100_000,
+        "device": "auto",
+    },
+)
+
+TORCH_SEQUENCE_PARAM_GRID: tuple[dict[str, Any], ...] = (
+    {
+        "lookback": 8,
+        "hidden_units": 32,
+        "epochs": 5,
+        "batch_size": 1024,
+        "learning_rate": 0.001,
+        "weight_decay": 0.001,
+        "dropout": 0.05,
+        "max_sequences": 40_000,
+        "device": "auto",
+        "num_layers": 1,
+        "nhead": 4,
+    },
+    {
+        "lookback": 12,
+        "hidden_units": 48,
+        "epochs": 6,
+        "batch_size": 1024,
+        "learning_rate": 0.0007,
+        "weight_decay": 0.001,
+        "dropout": 0.10,
+        "max_sequences": 50_000,
+        "device": "auto",
+        "num_layers": 1,
+        "nhead": 4,
+    },
+)
+
 
 class ForecastModel(Protocol):
     def predict(self, features: pd.DataFrame) -> Sequence[float]:
@@ -473,6 +525,469 @@ class CatBoostForecastModel:
         if self.task == "classification":
             return cb.CatBoostClassifier(loss_function="Logloss", **common)
         return cb.CatBoostRegressor(loss_function="RMSE", **common)
+
+
+class TorchMLPForecastModel:
+    def __init__(
+        self,
+        train_df: pd.DataFrame,
+        *,
+        feature_columns: tuple[str, ...],
+        target_column: str,
+        random_seed: int,
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        self.feature_columns = feature_columns
+        self.target_column = target_column
+        self.random_seed = random_seed
+        self.params = {**TORCH_MLP_PARAM_GRID[0], **(params or {})}
+        self.medians: pd.Series | None = None
+        self.means: pd.Series | None = None
+        self.stds: pd.Series | None = None
+        self.target_mean = 0.0
+        self.target_std = 1.0
+        self.constant_prediction: float | None = None
+        self.model: Any | None = None
+        self.device: Any | None = None
+        self._fit(train_df)
+
+    def predict(self, features: pd.DataFrame) -> list[float]:
+        if self.constant_prediction is not None:
+            return [self.constant_prediction] * len(features)
+        if self.model is None or self.device is None:
+            msg = "Torch MLP model has not been fit"
+            raise ValueError(msg)
+        torch = _import_torch()
+        x = self._transform_features(features, fit=False).to_numpy(dtype=np.float32)
+        self.model.eval()
+        with torch.no_grad():
+            tensor = torch.as_tensor(x, dtype=torch.float32, device=self.device)
+            predictions = self.model(tensor).squeeze(-1).detach().cpu().numpy()
+        unscaled = predictions.astype(float) * self.target_std + self.target_mean
+        return unscaled.tolist()
+
+    def _fit(self, train_df: pd.DataFrame) -> None:
+        torch = _import_torch()
+        target = pd.to_numeric(train_df[self.target_column], errors="coerce")
+        valid = target.notna()
+        if not valid.any():
+            self.constant_prediction = 0.0
+            return
+        frame = train_df.loc[valid].copy()
+        target = target.loc[valid]
+        frame["_target"] = target.to_numpy()
+        frame = frame.sort_values(["date", "ticker"]).reset_index(drop=True)
+        max_train_rows = self.params.get("max_train_rows")
+        if max_train_rows is not None and len(frame) > int(max_train_rows):
+            frame = frame.tail(int(max_train_rows)).reset_index(drop=True)
+        target = pd.to_numeric(frame.pop("_target"), errors="coerce")
+        if len(target) < 2:
+            self.constant_prediction = float(target.mean()) if len(target) else 0.0
+            return
+
+        x = self._transform_features(frame, fit=True).to_numpy(dtype=np.float32)
+        y = target.to_numpy(dtype=np.float32)
+        self.target_mean = float(np.mean(y))
+        target_std = float(np.std(y))
+        self.target_std = target_std if target_std > 1e-12 and np.isfinite(target_std) else 1.0
+        y = ((y - self.target_mean) / self.target_std).astype(np.float32)
+
+        torch.manual_seed(self.random_seed)
+        np.random.seed(self.random_seed)
+        self.device = _torch_device(torch, str(self.params.get("device", "auto")))
+        model = _make_torch_mlp(
+            torch,
+            input_dim=x.shape[1],
+            hidden_units=int(self.params["hidden_units"]),
+            dropout=float(self.params["dropout"]),
+        ).to(self.device)
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=float(self.params["learning_rate"]),
+            weight_decay=float(self.params["weight_decay"]),
+        )
+        loss_fn = torch.nn.SmoothL1Loss()
+        x_tensor = torch.as_tensor(x, dtype=torch.float32, device=self.device)
+        y_tensor = torch.as_tensor(y.reshape(-1, 1), dtype=torch.float32, device=self.device)
+        batch_size = max(1, int(self.params["batch_size"]))
+        epochs = max(1, int(self.params["epochs"]))
+        model.train()
+        for _ in range(epochs):
+            order = torch.randperm(len(x_tensor), device=self.device)
+            for start in range(0, len(x_tensor), batch_size):
+                idx = order[start : start + batch_size]
+                optimizer.zero_grad(set_to_none=True)
+                loss = loss_fn(model(x_tensor[idx]), y_tensor[idx])
+                loss.backward()
+                optimizer.step()
+        self.model = model
+
+    def _transform_features(self, frame: pd.DataFrame, *, fit: bool) -> pd.DataFrame:
+        missing = [column for column in self.feature_columns if column not in frame.columns]
+        if missing:
+            msg = f"missing Torch MLP feature columns: {missing}"
+            raise ValueError(msg)
+        x = frame.loc[:, list(self.feature_columns)].apply(pd.to_numeric, errors="coerce")
+        if fit:
+            self.medians = x.median().fillna(0)
+            filled = x.fillna(self.medians)
+            self.means = filled.mean()
+            self.stds = filled.std(ddof=0).replace(0, 1).fillna(1)
+        if self.medians is None or self.means is None or self.stds is None:
+            msg = "Torch MLP preprocessing statistics are unavailable"
+            raise ValueError(msg)
+        filled = x.fillna(self.medians)
+        return (filled - self.means) / self.stds
+
+
+class TorchSequenceForecastModel:
+    def __init__(
+        self,
+        train_df: pd.DataFrame,
+        *,
+        architecture: Literal["lstm", "transformer"],
+        feature_columns: tuple[str, ...],
+        target_column: str,
+        random_seed: int,
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        self.architecture = architecture
+        self.feature_columns = feature_columns
+        self.target_column = target_column
+        self.random_seed = random_seed
+        self.params = {**TORCH_SEQUENCE_PARAM_GRID[0], **(params or {})}
+        self.lookback = max(1, int(self.params["lookback"]))
+        self.medians: pd.Series | None = None
+        self.means: pd.Series | None = None
+        self.stds: pd.Series | None = None
+        self.target_mean = 0.0
+        self.target_std = 1.0
+        self.constant_prediction: float | None = None
+        self.model: Any | None = None
+        self.device: Any | None = None
+        self.history_by_ticker: dict[str, pd.DataFrame] = {}
+        self._fit(train_df)
+
+    def predict(self, features: pd.DataFrame) -> list[float]:
+        if self.constant_prediction is not None:
+            return [self.constant_prediction] * len(features)
+        if self.model is None or self.device is None:
+            msg = "Torch sequence model has not been fit"
+            raise ValueError(msg)
+        torch = _import_torch()
+        x = self._prediction_sequences(features)
+        self.model.eval()
+        predictions: list[np.ndarray] = []
+        batch_size = max(1, int(self.params["batch_size"]))
+        with torch.no_grad():
+            for start in range(0, len(x), batch_size):
+                tensor = torch.as_tensor(
+                    x[start : start + batch_size],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                batch_predictions = self.model(tensor).squeeze(-1).detach().cpu().numpy()
+                predictions.append(batch_predictions)
+        if predictions:
+            scaled = np.concatenate(predictions).astype(float)
+        else:
+            scaled = np.array([], dtype=float)
+        unscaled = scaled * self.target_std + self.target_mean
+        return unscaled.tolist()
+
+    def _fit(self, train_df: pd.DataFrame) -> None:
+        torch = _import_torch()
+        missing_id_columns = [column for column in ("ticker", "date") if column not in train_df]
+        if missing_id_columns:
+            msg = f"Torch sequence model requires columns: {missing_id_columns}"
+            raise ValueError(msg)
+        target = pd.to_numeric(train_df[self.target_column], errors="coerce")
+        valid = target.notna()
+        if not valid.any():
+            self.constant_prediction = 0.0
+            return
+
+        frame = train_df.loc[valid].copy()
+        target = target.loc[valid]
+        frame["_target"] = target.to_numpy()
+        frame = frame.sort_values(["ticker", "date"]).reset_index(drop=True)
+        self._store_prediction_history(frame)
+
+        target = pd.to_numeric(frame["_target"], errors="coerce")
+        if len(target) < 2:
+            self.constant_prediction = float(target.mean()) if len(target) else 0.0
+            return
+
+        x_rows = self._transform_features(frame, fit=True).to_numpy(dtype=np.float32)
+        x, y = self._training_sequences(frame, x_rows, target.to_numpy(dtype=np.float32))
+        if len(y) < 2:
+            self.constant_prediction = float(target.mean()) if len(target) else 0.0
+            return
+
+        self.target_mean = float(np.mean(y))
+        target_std = float(np.std(y))
+        self.target_std = target_std if target_std > 1e-12 and np.isfinite(target_std) else 1.0
+        y = ((y - self.target_mean) / self.target_std).astype(np.float32)
+
+        torch.manual_seed(self.random_seed)
+        np.random.seed(self.random_seed)
+        self.device = _torch_device(torch, str(self.params.get("device", "auto")))
+        model = _make_torch_sequence_model(
+            torch,
+            architecture=self.architecture,
+            input_dim=x.shape[2],
+            lookback=x.shape[1],
+            hidden_units=int(self.params["hidden_units"]),
+            dropout=float(self.params["dropout"]),
+            num_layers=int(self.params.get("num_layers", 1)),
+            nhead=int(self.params.get("nhead", 4)),
+        ).to(self.device)
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=float(self.params["learning_rate"]),
+            weight_decay=float(self.params["weight_decay"]),
+        )
+        loss_fn = torch.nn.SmoothL1Loss()
+        x_tensor = torch.as_tensor(x, dtype=torch.float32, device=self.device)
+        y_tensor = torch.as_tensor(y.reshape(-1, 1), dtype=torch.float32, device=self.device)
+        batch_size = max(1, int(self.params["batch_size"]))
+        epochs = max(1, int(self.params["epochs"]))
+        model.train()
+        for _ in range(epochs):
+            order = torch.randperm(len(x_tensor), device=self.device)
+            for start in range(0, len(x_tensor), batch_size):
+                idx = order[start : start + batch_size]
+                optimizer.zero_grad(set_to_none=True)
+                loss = loss_fn(model(x_tensor[idx]), y_tensor[idx])
+                loss.backward()
+                optimizer.step()
+        self.model = model
+
+    def _store_prediction_history(self, frame: pd.DataFrame) -> None:
+        columns = ["ticker", "date", *self.feature_columns]
+        self.history_by_ticker = {
+            str(ticker): group.loc[:, columns].tail(max(self.lookback - 1, 0)).copy()
+            for ticker, group in frame.groupby("ticker", sort=False)
+        }
+
+    def _training_sequences(
+        self,
+        frame: pd.DataFrame,
+        x_rows: np.ndarray,
+        y_rows: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        working = frame.loc[:, ["ticker", "date"]].copy()
+        working["_target"] = y_rows
+        records: list[tuple[pd.Timestamp, np.ndarray, float]] = []
+        for _, group in working.groupby("ticker", sort=False):
+            positions = group.index.to_numpy(dtype=int)
+            if len(positions) < self.lookback:
+                continue
+            targets = group["_target"].to_numpy(dtype=np.float32)
+            dates = pd.to_datetime(group["date"]).to_numpy()
+            for offset in range(self.lookback - 1, len(positions)):
+                target = float(targets[offset])
+                if not np.isfinite(target):
+                    continue
+                window = x_rows[positions[offset - self.lookback + 1 : offset + 1]].copy()
+                records.append((pd.Timestamp(dates[offset]), window, target))
+        if not records:
+            return (
+                np.empty((0, self.lookback, len(self.feature_columns)), dtype=np.float32),
+                np.empty((0,), dtype=np.float32),
+            )
+        max_sequences = self.params.get("max_sequences")
+        if max_sequences is not None and len(records) > int(max_sequences):
+            records = sorted(records, key=lambda item: item[0])[-int(max_sequences) :]
+        x = np.stack([record[1] for record in records]).astype(np.float32)
+        y = np.asarray([record[2] for record in records], dtype=np.float32)
+        return x, y
+
+    def _prediction_sequences(self, features: pd.DataFrame) -> np.ndarray:
+        if len(features) == 0:
+            return np.empty((0, self.lookback, len(self.feature_columns)), dtype=np.float32)
+        sequences: list[np.ndarray] = []
+        for _, row in features.iterrows():
+            ticker = str(row.get("ticker", ""))
+            current = pd.DataFrame([row])
+            history = self.history_by_ticker.get(ticker)
+            if history is not None and not history.empty:
+                sequence_frame = pd.concat([history, current], ignore_index=True)
+            else:
+                sequence_frame = current
+            transformed = self._transform_features(sequence_frame, fit=False).to_numpy(
+                dtype=np.float32
+            )
+            tail = transformed[-self.lookback :]
+            if len(tail) < self.lookback:
+                padding = np.zeros(
+                    (self.lookback - len(tail), len(self.feature_columns)),
+                    dtype=np.float32,
+                )
+                tail = np.vstack([padding, tail])
+            sequences.append(tail.astype(np.float32))
+        return np.stack(sequences).astype(np.float32)
+
+    def _transform_features(self, frame: pd.DataFrame, *, fit: bool) -> pd.DataFrame:
+        missing = [column for column in self.feature_columns if column not in frame.columns]
+        if missing:
+            msg = f"missing Torch sequence feature columns: {missing}"
+            raise ValueError(msg)
+        x = frame.loc[:, list(self.feature_columns)].apply(pd.to_numeric, errors="coerce")
+        if fit:
+            self.medians = x.median().fillna(0)
+            filled = x.fillna(self.medians)
+            self.means = filled.mean()
+            self.stds = filled.std(ddof=0).replace(0, 1).fillna(1)
+        if self.medians is None or self.means is None or self.stds is None:
+            msg = "Torch sequence preprocessing statistics are unavailable"
+            raise ValueError(msg)
+        filled = x.fillna(self.medians)
+        return (filled - self.means) / self.stds
+
+
+def _import_torch() -> Any:
+    try:
+        import torch
+    except ImportError as exc:
+        msg = (
+            "PyTorch is required for torch_mlp and torch sequence candidates. "
+            "Install with `uv sync --extra pytorch`."
+        )
+        raise RuntimeError(msg) from exc
+    return torch
+
+
+def _torch_device(torch: Any, requested: str) -> Any:
+    if requested == "auto":
+        return torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    if requested == "mps" and not torch.backends.mps.is_available():
+        return torch.device("cpu")
+    return torch.device(requested)
+
+
+def _make_torch_mlp(torch: Any, *, input_dim: int, hidden_units: int, dropout: float) -> Any:
+    return torch.nn.Sequential(
+        torch.nn.Linear(input_dim, hidden_units),
+        torch.nn.ReLU(),
+        torch.nn.Dropout(dropout),
+        torch.nn.Linear(hidden_units, max(8, hidden_units // 2)),
+        torch.nn.ReLU(),
+        torch.nn.Linear(max(8, hidden_units // 2), 1),
+    )
+
+
+def _make_torch_sequence_model(
+    torch: Any,
+    *,
+    architecture: Literal["lstm", "transformer"],
+    input_dim: int,
+    lookback: int,
+    hidden_units: int,
+    dropout: float,
+    num_layers: int,
+    nhead: int,
+) -> Any:
+    if architecture == "lstm":
+        return _TorchLSTMRegressor(
+            torch,
+            input_dim=input_dim,
+            hidden_units=hidden_units,
+            dropout=dropout,
+            num_layers=num_layers,
+        )
+    return _TorchTransformerRegressor(
+        torch,
+        input_dim=input_dim,
+        lookback=lookback,
+        hidden_units=hidden_units,
+        dropout=dropout,
+        nhead=_valid_transformer_heads(hidden_units, nhead),
+    )
+
+
+class _TorchLSTMRegressor:
+    def __new__(
+        cls,
+        torch: Any,
+        *,
+        input_dim: int,
+        hidden_units: int,
+        dropout: float,
+        num_layers: int,
+    ) -> Any:
+        class LSTMRegressor(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lstm = torch.nn.LSTM(
+                    input_dim,
+                    hidden_units,
+                    num_layers=max(1, num_layers),
+                    batch_first=True,
+                    dropout=dropout if num_layers > 1 else 0.0,
+                )
+                self.head = torch.nn.Sequential(
+                    torch.nn.LayerNorm(hidden_units),
+                    torch.nn.Dropout(dropout),
+                    torch.nn.Linear(hidden_units, 1),
+                )
+
+            def forward(self, x: Any) -> Any:
+                _, (hidden, _) = self.lstm(x)
+                return self.head(hidden[-1])
+
+        return LSTMRegressor()
+
+
+class _TorchTransformerRegressor:
+    def __new__(
+        cls,
+        torch: Any,
+        *,
+        input_dim: int,
+        lookback: int,
+        hidden_units: int,
+        dropout: float,
+        nhead: int,
+    ) -> Any:
+        class TransformerRegressor(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.input_projection = torch.nn.Linear(input_dim, hidden_units)
+                self.position = torch.nn.Parameter(torch.zeros(1, lookback, hidden_units))
+                layer = torch.nn.TransformerEncoderLayer(
+                    d_model=hidden_units,
+                    nhead=nhead,
+                    dim_feedforward=max(hidden_units * 2, 32),
+                    dropout=dropout,
+                    activation="gelu",
+                    batch_first=True,
+                    norm_first=True,
+                )
+                self.encoder = torch.nn.TransformerEncoder(
+                    layer,
+                    num_layers=1,
+                    enable_nested_tensor=False,
+                )
+                self.head = torch.nn.Sequential(
+                    torch.nn.LayerNorm(hidden_units),
+                    torch.nn.Dropout(dropout),
+                    torch.nn.Linear(hidden_units, 1),
+                )
+
+            def forward(self, x: Any) -> Any:
+                encoded = self.input_projection(x) + self.position[:, : x.shape[1], :]
+                encoded = self.encoder(encoded)
+                return self.head(encoded[:, -1, :])
+
+        return TransformerRegressor()
+
+
+def _valid_transformer_heads(hidden_units: int, requested: int) -> int:
+    for candidate in range(max(1, min(hidden_units, requested)), 0, -1):
+        if hidden_units % candidate == 0:
+            return candidate
+    return 1
 
 
 class BlendedForecastModel:

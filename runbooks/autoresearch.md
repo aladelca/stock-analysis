@@ -11,6 +11,9 @@ confirmation run before promotion.
 - Phase 1 artifacts exist under `data/runs/phase2-source-20260424`.
 - Dependencies are installed through `uv`.
 - Use `uv run --extra mlflow ...` or `uv sync --extra mlflow` before using MLflow tracking.
+- Use `uv run --extra pytorch ...` before evaluating `torch_mlp_*`, `torch_lstm_*`, or
+  `torch_transformer_*` candidates. On Apple Silicon, PyTorch candidates automatically use `mps`
+  when available and fall back to CPU otherwise.
 - The working tree is clean enough that candidate changes can be reviewed separately from evaluator
   or documentation changes.
 
@@ -32,6 +35,53 @@ valid evaluator outcome and still exits successfully.
 
 `--max-assets` is applied point-in-time at each rebalance date using the configured liquidity column.
 Do not use latest-date universe filtering for promotion evidence.
+
+## PyTorch Sequence Models
+
+LSTM and Transformer candidates are available for research, but they are not the current production
+recommendation. Sequence models need `ticker` and `date` in the prediction frame so the backtest can
+assemble point-in-time trailing windows per ticker; existing tabular models ignore those identifier
+columns.
+
+Run the fast sequence screen with the same production-economics settings used for the current best
+LightGBM candidate:
+
+```bash
+uv run --extra pytorch python scripts/autoresearch_eval.py \
+  --candidate torch_lstm_momentum_return_zscore \
+  --input-run-root data/runs/phase2-source-20260424 \
+  --max-assets 100 \
+  --max-rebalances 48 \
+  --optimizer-max-weight 0.24 \
+  --risk-aversion 10 \
+  --min-trade-weight 0.005 \
+  --lambda-turnover 5.0 \
+  --commission-rate 0.02 \
+  --initial-portfolio-value 1000 \
+  --monthly-deposit-amount 100 \
+  --deposit-frequency-days 30 \
+  --no-trade-band 0.04 \
+  --horizon-days 5 \
+  --rebalance-step-days 5 \
+  --embargo-days 15 \
+  --covariance-lookback-days 252 \
+  --iteration-id torch-lstm-momentum-return-zscore-pit-fast48-$(date +%Y%m%d) \
+  --results-tsv experiments/autoresearch/results.tsv \
+  --json-output docs/experiments/torch-lstm-momentum-return-zscore-pit-fast48-$(date +%Y%m%d).json
+```
+
+The 2026-04-28 screen rejected the Transformer variants and found the best sequence candidate to be
+`torch_lstm_momentum_return_zscore`. Its broad check was still weaker than LightGBM: Sharpe 1.376
+versus SPY 1.140, IR 0.852, and CI low -0.334. Do not promote it over
+`lightgbm_return_zscore`.
+
+Run optional PyTorch unit coverage separately from the LightGBM-heavy suite to avoid native OpenMP
+library collisions in one pytest process on macOS:
+
+```bash
+OMP_NUM_THREADS=1 PYTORCH_ENABLE_MPS_FALLBACK=1 STOCK_ANALYSIS_TEST_PYTORCH=1 \
+  uv run --extra pytorch pytest -q tests/unit/test_autoresearch_candidate.py -k torch
+```
 
 ## Turnover Penalty Tuning
 
@@ -141,15 +191,15 @@ Before promotion, rerun the candidate with the broadest feasible rebalance cover
 point-in-time liquidity screen. Record the command, config, ledger row, and interpretation in
 `docs/experiments/autoresearch-summary.md`.
 
-The current broad production-economics validation command is:
+The current broad production-economics validation command for the best researched candidate is:
 
 ```bash
 uv run --extra mlflow stock-analysis autoresearch-eval \
-  --candidate e8_scale_0p5 \
+  --candidate lightgbm_return_zscore \
   --input-run-root data/runs/phase2-source-20260424 \
   --max-assets 100 \
   --max-rebalances 241 \
-  --optimizer-max-weight 0.30 \
+  --optimizer-max-weight 0.24 \
   --risk-aversion 10 \
   --min-trade-weight 0.005 \
   --lambda-turnover 5.0 \
@@ -158,22 +208,23 @@ uv run --extra mlflow stock-analysis autoresearch-eval \
   --monthly-deposit-amount 100 \
   --deposit-frequency-days 30 \
   --rebalance-on-deposit-day \
-  --no-trade-band 0.02 \
+  --no-trade-band 0.04 \
   --horizon-days 5 \
   --rebalance-step-days 5 \
   --embargo-days 15 \
   --covariance-lookback-days 252 \
-  --iteration-id e8-scale-0p5-production-pit-broad-$(date +%Y%m%d) \
+  --iteration-id lightgbm-return-zscore-production-pit-broad-$(date +%Y%m%d) \
   --results-tsv experiments/autoresearch/results.tsv \
-  --json-output docs/experiments/e8-scale-0p5-production-pit-broad-$(date +%Y%m%d).json
+  --json-output docs/experiments/lightgbm-return-zscore-production-pit-broad-$(date +%Y%m%d).json
 ```
 
 For an account-size sensitivity that starts with $300 and then applies the same monthly deposits,
 change only `--initial-portfolio-value 300` and use an iteration id that includes `user300`.
 
-The 2026-04-28 corrected PIT broad run kept `e8_scale_0p5` as the best risk-adjusted candidate among
-the tested production-economics variants, but only as `provisional`. It beat SPY on ending-value point
-estimates, not on a statistically confirmed Sharpe-difference gate.
+The 2026-04-28 corrected PIT broad search found `lightgbm_return_zscore` with max weight 0.24 and
+band 0.04 as the best researched candidate on point estimates, but only as `provisional`. It beat SPY
+on ending value and Sharpe point estimates, not on the statistically confirmed Sharpe-difference
+gate.
 
 ## Promotion
 

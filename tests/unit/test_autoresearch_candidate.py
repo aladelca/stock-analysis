@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -21,6 +23,12 @@ class _ConstantModel:
     def predict(self, features: pd.DataFrame) -> list[float]:
         del features
         return self.values
+
+
+def _require_torch_test_enabled() -> None:
+    if os.environ.get("STOCK_ANALYSIS_TEST_PYTORCH") != "1":
+        pytest.skip("set STOCK_ANALYSIS_TEST_PYTORCH=1 to run optional PyTorch model tests")
+    pytest.importorskip("torch")
 
 
 def test_candidate_registry_contains_seeded_baseline() -> None:
@@ -138,6 +146,105 @@ def test_build_model_factory_returns_catboost_candidate() -> None:
     factory = build_model_factory(candidate, candidate.feature_columns)
     model = factory(train)
     predictions = model.predict(train[["momentum_21d", "volatility_21d"]])
+
+    assert len(predictions) == len(train)
+    assert all(np.isfinite(predictions))
+
+
+def test_build_model_factory_returns_torch_mlp_candidate() -> None:
+    _require_torch_test_enabled()
+    train = pd.DataFrame(
+        {
+            "ticker": ["AAA", "BBB", "CCC", "AAA", "BBB", "CCC"],
+            "date": [
+                "2026-01-01",
+                "2026-01-01",
+                "2026-01-01",
+                "2026-01-08",
+                "2026-01-08",
+                "2026-01-08",
+            ],
+            "momentum_21d": [0.1, -0.1, 0.05, 0.2, -0.2, 0.08],
+            "volatility_21d": [0.2, 0.3, 0.25, 0.2, 0.3, 0.25],
+            "fwd_return_5d": [0.03, -0.01, 0.01, 0.04, -0.02, 0.02],
+        }
+    )
+    candidate = CandidateSpec(
+        candidate_id="torch_test",
+        description="Torch MLP test",
+        model_kind="torch_mlp_regression",
+        feature_columns=("momentum_21d", "volatility_21d"),
+        torch_params={
+            "hidden_units": 8,
+            "epochs": 2,
+            "batch_size": 4,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0,
+            "dropout": 0.0,
+            "max_train_rows": 100,
+            "device": "cpu",
+        },
+    )
+
+    factory = build_model_factory(candidate, candidate.feature_columns)
+    model = factory(train)
+    predictions = model.predict(train[["momentum_21d", "volatility_21d"]])
+
+    assert len(predictions) == len(train)
+    assert all(np.isfinite(predictions))
+
+
+@pytest.mark.parametrize(
+    ("model_kind", "candidate_id"),
+    [
+        ("torch_lstm_regression", "torch_lstm_test"),
+        ("torch_transformer_regression", "torch_transformer_test"),
+    ],
+)
+def test_build_model_factory_returns_torch_sequence_candidate(
+    model_kind: str,
+    candidate_id: str,
+) -> None:
+    _require_torch_test_enabled()
+    train = pd.DataFrame(
+        {
+            "ticker": ["AAA", "BBB", "AAA", "BBB", "AAA", "BBB"],
+            "date": [
+                "2026-01-01",
+                "2026-01-01",
+                "2026-01-08",
+                "2026-01-08",
+                "2026-01-15",
+                "2026-01-15",
+            ],
+            "momentum_21d": [0.1, -0.1, 0.2, -0.2, 0.25, -0.25],
+            "volatility_21d": [0.2, 0.3, 0.2, 0.3, 0.22, 0.32],
+            "fwd_return_5d": [0.03, -0.01, 0.04, -0.02, 0.05, -0.03],
+        }
+    )
+    candidate = CandidateSpec(
+        candidate_id=candidate_id,
+        description="Torch sequence test",
+        model_kind=model_kind,  # type: ignore[arg-type]
+        feature_columns=("momentum_21d", "volatility_21d"),
+        torch_params={
+            "lookback": 2,
+            "hidden_units": 8,
+            "epochs": 1,
+            "batch_size": 4,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0,
+            "dropout": 0.0,
+            "max_sequences": 100,
+            "device": "cpu",
+            "num_layers": 1,
+            "nhead": 2,
+        },
+    )
+
+    factory = build_model_factory(candidate, candidate.feature_columns)
+    model = factory(train)
+    predictions = model.predict(train[["ticker", "date", "momentum_21d", "volatility_21d"]])
 
     assert len(predictions) == len(train)
     assert all(np.isfinite(predictions))

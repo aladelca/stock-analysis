@@ -1,0 +1,126 @@
+{
+  "baseline": {
+    "active_return": 0.636036,
+    "candidate_id": "phase2_e8_final",
+    "candidate_sharpe": 2.987197,
+    "information_ratio": 2.212435,
+    "sharpe_diff": 1.856512,
+    "sharpe_diff_ci_high": 1.5416748795037905,
+    "sharpe_diff_ci_low": -0.4455413268214286,
+    "spy_sharpe": 1.130685
+  },
+  "candidate": {
+    "candidate_id": "catboost_momentum_return_zscore",
+    "description": "CatBoost return regression using momentum, rank, and return features.",
+    "feature_columns": [
+      "momentum_21d",
+      "momentum_63d",
+      "momentum_126d",
+      "momentum_252d",
+      "momentum_21d_rank",
+      "momentum_63d_rank",
+      "momentum_126d_rank",
+      "momentum_252d_rank",
+      "return_5d",
+      "return_21d",
+      "return_21d_excess"
+    ],
+    "model_kind": "catboost_regression",
+    "training_target_column": null
+  },
+  "config": {
+    "commission_rate": 0.02,
+    "cost_bps": 5.0,
+    "covariance_lookback_days": 252,
+    "deposit_frequency_days": 30,
+    "deposit_start_date": null,
+    "embargo_days": 15,
+    "horizon_days": 5,
+    "initial_portfolio_value": 1000.0,
+    "input_run_root": "data/runs/phase2-source-20260424",
+    "lambda_turnover": 5.0,
+    "max_assets": 100,
+    "max_rebalances": 241,
+    "max_trade_abs_weight": null,
+    "min_trade_weight": 0.005,
+    "monthly_deposit_amount": 100.0,
+    "no_trade_band": 0.02,
+    "optimizer_max_weight": 0.3,
+    "rebalance_on_deposit_day": true,
+    "rebalance_step_days": 5,
+    "risk_aversion": 10.0
+  },
+  "decision": {
+    "notes": "candidate beats SPY on point estimates but CI lower bound is not positive",
+    "objective_improved": false,
+    "passed_spy_gate": true,
+    "status": "provisional"
+  },
+  "git_commit": "190daa40ce8a08dae167355b29a35c27e7668494",
+  "iteration_id": "catboost-momentum-return-zscore-production-pit-broad-20260428",
+  "metrics": {
+    "benchmark_relative": {
+      "active_return": 0.14145236889234303,
+      "active_return_period": 0.0028290473778468605,
+      "alpha": 0.09167532280326211,
+      "benchmark_mean_return_period": 0.00374928088013274,
+      "beta": 1.2655284982933508,
+      "information_ratio": 0.8311079567873354,
+      "observations": 236.0,
+      "portfolio_mean_return_period": 0.006578328257979602,
+      "tracking_error": 0.17019734649049686,
+      "tracking_error_period": 0.024069539568677356
+    },
+    "cashflow": {
+      "active_ending_value": 5468.5215679616595,
+      "active_time_weighted_return": 1.8293470907978895,
+      "benchmark_commission_to_deposit_ratio": 0.024166666666666666,
+      "benchmark_ending_value": 10045.59280595671,
+      "benchmark_money_weighted_return": 0.24966787114578914,
+      "benchmark_time_weighted_return": 1.1552111148889654,
+      "benchmark_total_commissions": 116.0,
+      "benchmark_total_deposits": 4800.0,
+      "benchmark_total_return_on_invested_capital": 0.7319987596477087,
+      "strategy_commission_to_deposit_ratio": 0.06875573239147154,
+      "strategy_ending_value": 15514.11437391837,
+      "strategy_money_weighted_return": 0.4642470090365124,
+      "strategy_time_weighted_return": 2.984558205686855,
+      "strategy_total_commissions": 330.02751547906337,
+      "strategy_total_deposits": 4800.0,
+      "strategy_total_return_on_invested_capital": 1.6748473058479947
+    },
+    "comparison": {
+      "active_return": 0.14145236889234303,
+      "annualized_return": 0.34029127266663073,
+      "candidate_sharpe": 1.275287454249845,
+      "information_ratio": 0.8311079567873354,
+      "ir_observations": 236.0,
+      "max_drawdown": -0.2433562517690505,
+      "mean_turnover": 0.010151235491059897,
+      "sharpe_diff": 0.13568319541781348,
+      "sharpe_diff_ci_high": 0.9915775772644271,
+      "sharpe_diff_ci_low": -0.6666969140109795,
+      "spy_sharpe": 1.1396042588320314,
+      "tracking_error": 0.17019734649049686
+    },
+    "portfolio": {
+      "annualized_return": 0.34029127266663073,
+      "annualized_volatility": 0.26683495672495133,
+      "calmar": 1.3983255831437333,
+      "deflated_sharpe_ratio": 1.275287454249845,
+      "hit_rate": 0.559322033898305,
+      "max_drawdown": -0.2433562517690505,
+      "sharpe": 1.275287454249845
+    },
+    "spy": {
+      "annualized_return": 0.18927281647358907,
+      "annualized_volatility": 0.1660864418562044,
+      "calmar": 0.8791565871036299,
+      "deflated_sharpe_ratio": 1.1396042588320314,
+      "hit_rate": 0.6228813559322034,
+      "max_drawdown": -0.21528908416320458,
+      "sharpe": 1.1396042588320314
+    }
+  },
+  "timestamp_utc": "2026-04-28T15:11:00.570333+00:00"
+}

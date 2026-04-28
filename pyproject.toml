@@ -37,6 +37,9 @@ mlflow = [
 supabase = [
   "supabase>=2.15.0",
 ]
+pytorch = [
+    "torch>=2.11.0",
+]
 
 [project.scripts]
 stock-analysis = "stock_analysis.cli:app"

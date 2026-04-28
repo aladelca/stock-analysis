@@ -10,10 +10,14 @@ import pandas as pd
 from stock_analysis.ml.phase2 import (
     CATBOOST_PARAM_GRID,
     DEFAULT_FEATURE_CANDIDATES,
+    TORCH_MLP_PARAM_GRID,
+    TORCH_SEQUENCE_PARAM_GRID,
     BlendedForecastModel,
     CatBoostForecastModel,
     LightGBMForecastModel,
     RidgeForecastModel,
+    TorchMLPForecastModel,
+    TorchSequenceForecastModel,
 )
 
 
@@ -30,6 +34,9 @@ ModelKind = Literal[
     "lightgbm_rank",
     "catboost_regression",
     "catboost_classification",
+    "torch_mlp_regression",
+    "torch_lstm_regression",
+    "torch_transformer_regression",
     "e8_blend",
     "weighted_e8_blend",
     "ridge_catboost_blend",
@@ -52,6 +59,7 @@ class CandidateSpec:
     lightgbm_weight: float = 1.0
     catboost_weight: float = 1.0
     catboost_params: dict[str, Any] | None = None
+    torch_params: dict[str, Any] | None = None
     score_transform: ScoreTransform = lambda values: values
 
 
@@ -304,6 +312,32 @@ def _build_model(
             score_column=f"fwd_return_{candidate.horizon_days}d",
             random_seed=candidate.random_seed,
             params=candidate.catboost_params,
+        )
+    if candidate.model_kind == "torch_mlp_regression":
+        return TorchMLPForecastModel(
+            train_df,
+            feature_columns=feature_columns,
+            target_column=target_column,
+            random_seed=candidate.random_seed,
+            params=candidate.torch_params,
+        )
+    if candidate.model_kind == "torch_lstm_regression":
+        return TorchSequenceForecastModel(
+            train_df,
+            architecture="lstm",
+            feature_columns=feature_columns,
+            target_column=target_column,
+            random_seed=candidate.random_seed,
+            params=candidate.torch_params,
+        )
+    if candidate.model_kind == "torch_transformer_regression":
+        return TorchSequenceForecastModel(
+            train_df,
+            architecture="transformer",
+            feature_columns=feature_columns,
+            target_column=target_column,
+            random_seed=candidate.random_seed,
+            params=candidate.torch_params,
         )
     if candidate.model_kind == "e8_blend":
         return BlendedForecastModel(
@@ -636,6 +670,92 @@ CANDIDATES: dict[str, CandidateSpec] = {
         model_kind="catboost_regression",
         horizon_days=5,
         feature_columns=MOMENTUM_RISK_FEATURES,
+        score_transform=zscore_scores,
+    ),
+    "torch_mlp_return_zscore": CandidateSpec(
+        candidate_id="torch_mlp_return_zscore",
+        description="PyTorch MLP return regression with z-scored forecast scores.",
+        model_kind="torch_mlp_regression",
+        horizon_days=5,
+        score_transform=zscore_scores,
+    ),
+    "torch_mlp_return_deep_zscore": CandidateSpec(
+        candidate_id="torch_mlp_return_deep_zscore",
+        description="PyTorch MLP return regression with deeper params and z-scored scores.",
+        model_kind="torch_mlp_regression",
+        horizon_days=5,
+        torch_params=TORCH_MLP_PARAM_GRID[1],
+        score_transform=zscore_scores,
+    ),
+    "torch_mlp_momentum_return_zscore": CandidateSpec(
+        candidate_id="torch_mlp_momentum_return_zscore",
+        description="PyTorch MLP return regression using momentum, rank, and return features.",
+        model_kind="torch_mlp_regression",
+        horizon_days=5,
+        feature_columns=MOMENTUM_RETURN_FEATURES,
+        score_transform=zscore_scores,
+    ),
+    "torch_mlp_momentum_return_deep_zscore": CandidateSpec(
+        candidate_id="torch_mlp_momentum_return_deep_zscore",
+        description=(
+            "PyTorch MLP return regression using momentum/return features and deeper params."
+        ),
+        model_kind="torch_mlp_regression",
+        horizon_days=5,
+        feature_columns=MOMENTUM_RETURN_FEATURES,
+        torch_params=TORCH_MLP_PARAM_GRID[1],
+        score_transform=zscore_scores,
+    ),
+    "torch_lstm_return_zscore": CandidateSpec(
+        candidate_id="torch_lstm_return_zscore",
+        description="PyTorch LSTM return regression over per-ticker feature windows.",
+        model_kind="torch_lstm_regression",
+        horizon_days=5,
+        score_transform=zscore_scores,
+    ),
+    "torch_lstm_return_deep_zscore": CandidateSpec(
+        candidate_id="torch_lstm_return_deep_zscore",
+        description="PyTorch LSTM return regression with longer lookback and wider hidden state.",
+        model_kind="torch_lstm_regression",
+        horizon_days=5,
+        torch_params=TORCH_SEQUENCE_PARAM_GRID[1],
+        score_transform=zscore_scores,
+    ),
+    "torch_lstm_momentum_return_zscore": CandidateSpec(
+        candidate_id="torch_lstm_momentum_return_zscore",
+        description="PyTorch LSTM return regression using momentum, rank, and return features.",
+        model_kind="torch_lstm_regression",
+        horizon_days=5,
+        feature_columns=MOMENTUM_RETURN_FEATURES,
+        score_transform=zscore_scores,
+    ),
+    "torch_transformer_return_zscore": CandidateSpec(
+        candidate_id="torch_transformer_return_zscore",
+        description="PyTorch Transformer encoder return regression over feature windows.",
+        model_kind="torch_transformer_regression",
+        horizon_days=5,
+        score_transform=zscore_scores,
+    ),
+    "torch_transformer_return_deep_zscore": CandidateSpec(
+        candidate_id="torch_transformer_return_deep_zscore",
+        description=(
+            "PyTorch Transformer encoder return regression with longer lookback and wider "
+            "hidden state."
+        ),
+        model_kind="torch_transformer_regression",
+        horizon_days=5,
+        torch_params=TORCH_SEQUENCE_PARAM_GRID[1],
+        score_transform=zscore_scores,
+    ),
+    "torch_transformer_momentum_return_zscore": CandidateSpec(
+        candidate_id="torch_transformer_momentum_return_zscore",
+        description=(
+            "PyTorch Transformer encoder return regression using momentum, rank, and return "
+            "features."
+        ),
+        model_kind="torch_transformer_regression",
+        horizon_days=5,
+        feature_columns=MOMENTUM_RETURN_FEATURES,
         score_transform=zscore_scores,
     ),
     "ridge_catboost_1p0_1p0_scale_1p00": CandidateSpec(
