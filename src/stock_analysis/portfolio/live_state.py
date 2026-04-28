@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 
@@ -107,7 +107,7 @@ def _unapplied_cashflows_after_snapshot(
     snapshot: PortfolioSnapshotRecord,
     as_of_date: date,
 ) -> list[CashflowRecord]:
-    start_date = snapshot.snapshot_date + timedelta(days=1)
+    start_date = snapshot.snapshot_date
     return [
         cashflow
         for cashflow in cashflows

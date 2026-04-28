@@ -85,7 +85,7 @@ uv run --extra supabase stock-analysis register-cashflow \
   --type deposit
 ```
 
-For account performance versus SPY, cashflows entered on weekends or market holidays are applied to the next available SPY trading date in the benchmark simulation. The original cashflow date remains unchanged in Supabase and in the cashflow mart.
+For account performance versus SPY, cashflows entered on weekends or market holidays are applied to the next available SPY trading date in the benchmark simulation. The original cashflow date remains unchanged in Supabase and in the cashflow mart. Same-day cashflows are applied to live recommendations when `included_in_snapshot_id` is empty; set `included_in_snapshot_id` when the cashflow is already included in the imported snapshot.
 
 Withdrawals, fees, and taxes are stored as negative cashflows even if you pass a positive amount:
 
@@ -150,7 +150,7 @@ uv run --extra supabase stock-analysis show-latest-portfolio-snapshot \
 
 ## Run Live Recommendations
 
-When `live_account.cashflow_source: actual` is set, `run-one-shot` loads the latest portfolio snapshot on or before the market data date, applies settled cashflows after that snapshot, and uses that amount as the rebalance contribution. The monthly deposit assumption remains for backtesting and scenario mode.
+When `live_account.cashflow_source: actual` is set, `run-one-shot` loads the latest portfolio snapshot on or before the market data date, applies settled cashflows on or after that snapshot date unless they are marked as included in the snapshot, and uses that amount as the rebalance contribution. The monthly deposit assumption remains for backtesting and scenario mode.
 
 ```bash
 uv run --extra supabase stock-analysis run-one-shot \

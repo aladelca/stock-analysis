@@ -5,6 +5,12 @@ import pandas as pd
 
 from stock_analysis.config import ForecastConfig
 from stock_analysis.domain.schemas import validate_columns
+from stock_analysis.ml.autoresearch_candidate import (
+    CandidateSpec,
+    build_model_factory,
+    get_candidate,
+    resolve_feature_columns,
+)
 from stock_analysis.ml.phase2 import DEFAULT_FEATURE_CANDIDATES, BlendedForecastModel
 
 
@@ -22,7 +28,8 @@ def build_ml_optimizer_inputs(
 
     panel = _prepare_panel(feature_panel)
     labels = _prepare_labels(labels_panel)
-    target_column = f"fwd_return_{config.ml_horizon_days}d"
+    candidate = _candidate_from_model_version(config.ml_model_version)
+    target_column = _target_column(config, candidate)
     if target_column not in labels.columns:
         msg = f"labels panel is missing required ML target column: {target_column}"
         raise ValueError(msg)
@@ -40,20 +47,28 @@ def build_ml_optimizer_inputs(
             latest_features["ticker"].astype(str).isin(top_tickers)
         ].copy()
 
-    feature_columns = _feature_columns(panel, config)
+    feature_columns = (
+        resolve_feature_columns(panel, candidate)
+        if candidate is not None
+        else _feature_columns(panel, config)
+    )
     train = panel.merge(labels[["ticker", "date", target_column]], on=["ticker", "date"])
     train = train.loc[(train["date"] < latest_date) & train[target_column].notna()].copy()
     if train.empty:
         msg = "No labeled training rows are available for ML optimizer input generation"
         raise ValueError(msg)
 
-    model = BlendedForecastModel(
-        train,
-        feature_columns=feature_columns,
-        return_target_column=target_column,
-        random_seed=config.ml_random_seed,
-        nested_cv=config.ml_lightgbm_nested_cv,
-        inner_folds=config.ml_lightgbm_inner_folds,
+    model = (
+        build_model_factory(candidate, feature_columns)(train)
+        if candidate is not None
+        else BlendedForecastModel(
+            train,
+            feature_columns=feature_columns,
+            return_target_column=target_column,
+            random_seed=config.ml_random_seed,
+            nested_cv=config.ml_lightgbm_nested_cv,
+            inner_folds=config.ml_lightgbm_inner_folds,
+        )
     )
     forecast_score = np.asarray(model.predict(latest_features), dtype=float) * float(
         config.ml_score_scale
@@ -140,6 +155,19 @@ def _feature_columns(panel: pd.DataFrame, config: ForecastConfig) -> tuple[str, 
         msg = f"Configured ML feature columns are missing from the panel: {missing}"
         raise ValueError(msg)
     return columns
+
+
+def _candidate_from_model_version(model_version: str) -> CandidateSpec | None:
+    try:
+        return get_candidate(model_version)
+    except ValueError:
+        return None
+
+
+def _target_column(config: ForecastConfig, candidate: CandidateSpec | None) -> str:
+    if candidate is not None:
+        return candidate.training_target_column or f"fwd_return_{candidate.horizon_days}d"
+    return f"fwd_return_{config.ml_horizon_days}d"
 
 
 def _volatility(frame: pd.DataFrame) -> pd.Series:

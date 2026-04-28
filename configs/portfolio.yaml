@@ -36,16 +36,16 @@ forecast:
   volatility_penalty: 0.25
   covariance_lookback_days: 252
   label_horizons: [5, 21, 63]
-  ml_model_version: e8-scale-0p5-contribution-aware-v1
+  ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
   ml_max_assets: 100
-  ml_score_scale: 0.5
+  ml_score_scale: 1.0
   ml_lightgbm_nested_cv: false
   ml_lightgbm_inner_folds: 2
   ml_random_seed: 42
 
 optimizer:
-  max_weight: 0.30
+  max_weight: 0.24
   risk_aversion: 10.0
   min_trade_weight: 0.005
   min_rebalance_trade_weight: 0.005
@@ -53,6 +53,7 @@ optimizer:
   commission_rate: 0.02
   sector_max_weight: 0.35
   max_trade_abs_weight: null
+  preserve_outside_holdings: true
   solver: null
 
 portfolio_state:
@@ -68,7 +69,7 @@ contributions:
 
 execution:
   cash_balance: 0.0
-  no_trade_band: 0.0
+  no_trade_band: 0.04
 
 live_account:
   enabled: false

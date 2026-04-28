@@ -32,14 +32,15 @@ Enable publishing in `configs/portfolio.local.yaml`:
 ```yaml
 forecast:
   engine: ml
-  ml_model_version: e8-scale-0p5-contribution-aware-v1
+  ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
   ml_max_assets: 100
-  ml_score_scale: 0.5
+  ml_score_scale: 1.0
 
 optimizer:
-  max_weight: 0.30
+  max_weight: 0.24
   lambda_turnover: 5.0
+  preserve_outside_holdings: true
 
 tableau:
   export_hyper: true

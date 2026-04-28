@@ -79,17 +79,18 @@ prices:
 
 forecast:
   engine: ml
-  ml_model_version: e8-scale-0p5-contribution-aware-v1
+  ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
   ml_max_assets: 100
-  ml_score_scale: 0.5
+  ml_score_scale: 1.0
 
 optimizer:
-  max_weight: 0.30
+  max_weight: 0.24
   risk_aversion: 10.0
   commission_rate: 0.02
   min_rebalance_trade_weight: 0.005
   sector_max_weight: 0.35
+  preserve_outside_holdings: true
 
 portfolio_state:
   current_holdings_path: null
@@ -104,7 +105,7 @@ contributions:
 
 execution:
   cash_balance: 0.0
-  no_trade_band: 0.0
+  no_trade_band: 0.04
 
 mlflow:
   enabled: true
@@ -122,16 +123,17 @@ Notes:
 - `as_of_date: null` means the requested run date is today.
 - Gold `as_of_date` is the latest available price date, not necessarily today.
 - `run_id: null` lets the pipeline generate a UTC run id.
-- `forecast.ml_model_version: e8-scale-0p5-contribution-aware-v1` is the corrected
-  contribution-aware E8 model selected in `docs/experiments/e8-scale-0p5-contribution-corrected-20260426.json`.
-- `forecast.ml_score_scale: 0.5` applies the score scaling required by the selected `e8_scale_0p5`
-  candidate.
+- `forecast.ml_model_version: lightgbm_return_zscore` uses the best researched PIT
+  production-economics candidate from `docs/experiments/autoresearch-summary.md`.
+- `forecast.ml_score_scale: 1.0` keeps the candidate's z-scored forecast scale unchanged.
 - `portfolio_state.current_holdings_path: null` means first-allocation mode.
 - `contributions.monthly_deposit_amount: 0.0` disables scenario-mode deposit modeling for the
   one-shot run. Backtests and autoresearch still use the monthly deposit assumption when supplied.
 - For live account tracking with arbitrary-date deposits, use the Supabase flow in
   `runbooks/supabase-account-tracking.md` and set `live_account.cashflow_source: actual`.
-- `execution.no_trade_band: 0.0` means trades are filtered only by `min_rebalance_trade_weight`.
+- `execution.no_trade_band: 0.04` avoids small trades below 4% of portfolio value.
+- `optimizer.preserve_outside_holdings: true` keeps current positions outside the stock optimizer
+  universe, such as SPY, unless you explicitly turn that off.
 - `optimizer.commission_rate: 0.02` charges 2% of absolute traded portfolio weight.
 - `mlflow.enabled: true` logs parameters, recommendation metrics, risk metrics, and gold artifacts.
 - Set `tableau.export_hyper: true` only after installing the Tableau extra.
@@ -193,7 +195,7 @@ on the post-deposit portfolio value.
 
 ## 6. Run The One-Shot Pipeline
 
-The default production config uses the corrected `e8_scale_0p5` ML forecast flow. To make the
+The default production config uses the `lightgbm_return_zscore` ML forecast flow. To make the
 forecast choice explicit in operator runs:
 
 ```bash
@@ -305,7 +307,7 @@ Expected:
 - `data_as_of_date` equals the latest available market price date.
 - Recommendation `as_of_date` equals `data_as_of_date`.
 - `forecast_engine` is `ml`.
-- `model_version` is `e8-scale-0p5-contribution-aware-v1`.
+- `model_version` is `lightgbm_return_zscore`.
 - `target_weight` sums approximately to `1.0`.
 - `estimated_commission_weight` equals `0.02 * trade_abs_weight` for planned BUY/SELL rows.
 - `commission_amount` equals `0.02 * abs(trade_notional)` for planned BUY/SELL rows.
@@ -385,14 +387,15 @@ Edit `configs/portfolio.local.yaml`:
 ```yaml
 forecast:
   engine: ml
-  ml_model_version: e8-scale-0p5-contribution-aware-v1
+  ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
   ml_max_assets: 100
-  ml_score_scale: 0.5
+  ml_score_scale: 1.0
 
 optimizer:
-  max_weight: 0.30
+  max_weight: 0.24
   lambda_turnover: 5.0
+  preserve_outside_holdings: true
 
 tableau:
   export_csv: true
@@ -488,14 +491,15 @@ Edit `configs/portfolio.local.yaml`:
 ```yaml
 forecast:
   engine: ml
-  ml_model_version: e8-scale-0p5-contribution-aware-v1
+  ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
   ml_max_assets: 100
-  ml_score_scale: 0.5
+  ml_score_scale: 1.0
 
 optimizer:
-  max_weight: 0.30
+  max_weight: 0.24
   lambda_turnover: 5.0
+  preserve_outside_holdings: true
 
 tableau:
   export_csv: true

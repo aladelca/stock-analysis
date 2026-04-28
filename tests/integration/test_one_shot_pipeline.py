@@ -328,7 +328,7 @@ def test_one_shot_pipeline_can_use_ml_forecast_engine(sample_html, tmp_path: Pat
     metadata = pd.read_parquet(output_root / "gold" / "run_metadata.parquet")
 
     assert optimizer_input["forecast_engine"].eq("ml").all()
-    assert optimizer_input["forecast_model_version"].eq("e8-scale-0p5-contribution-aware-v1").all()
+    assert optimizer_input["forecast_model_version"].eq("lightgbm_return_zscore").all()
     assert recommendations["target_weight"].sum() == pytest.approx(1.0)
     assert metadata["forecast_engine"].iat[0] == "ml"
     assert not bool(metadata["expected_return_is_calibrated"].iat[0])

@@ -50,6 +50,43 @@ def test_live_state_applies_settled_cashflows_after_latest_snapshot() -> None:
     assert live_state.state.weights.to_dict() == {"AAPL": 0.9}
 
 
+def test_live_state_applies_same_day_cashflow_not_marked_in_snapshot() -> None:
+    repository = FakeLiveRepository(
+        cashflows=[
+            CashflowRecord(
+                account_id="account-1",
+                cashflow_date=date(2026, 4, 28),
+                amount=300.0,
+                cashflow_type="deposit",
+            ),
+            CashflowRecord(
+                account_id="account-1",
+                cashflow_date=date(2026, 4, 28),
+                amount=150.0,
+                cashflow_type="deposit",
+                included_in_snapshot_id="snapshot-1",
+            ),
+        ]
+    )
+    repository.snapshot = PortfolioSnapshotRecord(
+        id="snapshot-1",
+        account_id="account-1",
+        snapshot_date=date(2026, 4, 28),
+        market_value=900.0,
+        cash_balance=100.0,
+        total_value=1000.0,
+    )
+
+    live_state = build_live_portfolio_state(
+        repository,
+        AccountRecord(id="account-1", slug="main", display_name="Main"),
+        as_of_date=date(2026, 4, 28),
+    )
+
+    assert live_state.contribution_amount == 300.0
+    assert [cashflow.amount for cashflow in live_state.applied_cashflows] == [300.0]
+
+
 def test_live_state_requires_fresh_snapshot_after_negative_net_cashflow() -> None:
     repository = FakeLiveRepository(
         cashflows=[

@@ -73,11 +73,11 @@ class ForecastConfig(BaseModel):
     volatility_penalty: float = Field(default=0.25, ge=0)
     covariance_lookback_days: int = Field(default=252, ge=2)
     label_horizons: list[int] = Field(default_factory=lambda: [5, 21, 63])
-    ml_model_version: str = "e8-scale-0p5-contribution-aware-v1"
+    ml_model_version: str = "lightgbm_return_zscore"
     ml_horizon_days: int = Field(default=5, ge=1)
     ml_max_assets: int | None = Field(default=100, ge=1)
     ml_feature_columns: list[str] = Field(default_factory=list)
-    ml_score_scale: float = Field(default=0.5, gt=0)
+    ml_score_scale: float = Field(default=1.0, gt=0)
     ml_lightgbm_nested_cv: bool = False
     ml_lightgbm_inner_folds: int = Field(default=2, ge=1)
     ml_random_seed: int = 42
@@ -100,6 +100,7 @@ class OptimizerConfig(BaseModel):
     commission_rate: float = Field(default=0.02, ge=0, le=1)
     sector_max_weight: float | None = Field(default=None, gt=0, le=1)
     max_trade_abs_weight: float | None = Field(default=None, ge=0, le=2)
+    preserve_outside_holdings: bool = False
     solver: str | None = None
 
 

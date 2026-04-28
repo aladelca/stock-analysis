@@ -78,7 +78,7 @@ def test_build_ml_optimizer_inputs_uses_phase2_blend_and_liquidity_filter() -> N
 
     assert len(optimizer_input) == 4
     assert optimizer_input["forecast_engine"].eq("ml").all()
-    assert optimizer_input["forecast_model_version"].eq("e8-scale-0p5-contribution-aware-v1").all()
+    assert optimizer_input["forecast_model_version"].eq("lightgbm_return_zscore").all()
     assert not optimizer_input["expected_return_is_calibrated"].any()
     assert optimizer_input["expected_return"].notna().all()
     np.testing.assert_allclose(

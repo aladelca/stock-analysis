@@ -186,6 +186,11 @@ def run_one_shot(
         context_tickers,
         contribution_amount=contribution_amount,
     )
+    investable_weight = _investable_optimizer_weight(
+        rebalance_context.current_weights,
+        optimizer_input["ticker"].astype(str),
+        preserve_outside_holdings=config.optimizer.preserve_outside_holdings,
+    )
     current_weights = rebalance_context.current_weights.reindex(
         optimizer_input["ticker"].astype(str)
     ).fillna(0.0)
@@ -195,6 +200,7 @@ def run_one_shot(
         config.optimizer,
         w_prev=current_weights,
     )
+    weights = weights * investable_weight
     recommendations = build_recommendations(
         optimizer_input,
         weights,
@@ -204,6 +210,7 @@ def run_one_shot(
         current_weights=current_weights,
         rebalance_context=rebalance_context,
         no_trade_band=config.execution.no_trade_band,
+        preserve_outside_holdings=config.optimizer.preserve_outside_holdings,
     )
     recommendations = attach_forecast_outcomes(
         recommendations,
@@ -382,6 +389,21 @@ def _load_rebalance_state(
         live_state.contribution_amount,
     )
     return live_state.state, live_state.contribution_amount, live_state, repository
+
+
+def _investable_optimizer_weight(
+    current_weights: pd.Series,
+    optimizer_tickers: pd.Series,
+    *,
+    preserve_outside_holdings: bool,
+) -> float:
+    if not preserve_outside_holdings:
+        return 1.0
+    optimizer_universe = set(optimizer_tickers.astype(str))
+    weights = current_weights.copy()
+    weights.index = weights.index.astype(str)
+    outside_weight = float(weights.loc[~weights.index.isin(optimizer_universe)].clip(lower=0).sum())
+    return max(1.0 - outside_weight, 0.0)
 
 
 def _persist_account_tracking_outputs(

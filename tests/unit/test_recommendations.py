@@ -175,6 +175,49 @@ def test_recommendations_use_outside_holding_sale_proceeds_for_buys() -> None:
     assert by_ticker.loc["AAA", "cash_after_trade_amount"] == pytest.approx(0.0)
 
 
+def test_recommendations_can_preserve_outside_holding_and_use_deposit_for_buys() -> None:
+    optimizer_input = pd.DataFrame(
+        {
+            "ticker": ["AAA"],
+            "security": ["AAA Corp"],
+            "gics_sector": ["Technology"],
+            "expected_return": [0.1],
+            "volatility": [0.2],
+            "eligible_for_optimization": [True],
+        }
+    )
+    weights = pd.Series([0.5], index=["AAA"])
+    context = build_rebalance_context(
+        PortfolioState(
+            weights=pd.Series({"SPY": 0.5}),
+            market_values=pd.Series({"SPY": 300.0}),
+            cash_balance=0.0,
+            portfolio_value=300.0,
+        ),
+        ["AAA", "SPY"],
+        contribution_amount=300.0,
+    )
+
+    recommendations = build_recommendations(
+        optimizer_input,
+        weights,
+        OptimizerConfig(max_weight=1.0, commission_rate=0.02),
+        "2026-04-28",
+        "run-1",
+        rebalance_context=context,
+        preserve_outside_holdings=True,
+    )
+
+    by_ticker = recommendations.set_index("ticker")
+    assert by_ticker.loc["SPY", "action"] == "HOLD"
+    assert by_ticker.loc["SPY", "target_weight"] == pytest.approx(0.5)
+    assert by_ticker.loc["SPY", "trade_notional"] == pytest.approx(0.0)
+    assert by_ticker.loc["AAA", "action"] == "BUY"
+    assert by_ticker.loc["AAA", "trade_notional"] == pytest.approx(294.1176470588)
+    assert by_ticker.loc["AAA", "commission_amount"] == pytest.approx(5.8823529412)
+    assert by_ticker.loc["AAA", "deposit_used_amount"] == pytest.approx(300.0)
+
+
 def test_no_trade_band_converts_small_trades_to_hold() -> None:
     optimizer_input = pd.DataFrame(
         {

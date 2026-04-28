@@ -20,6 +20,7 @@ def build_recommendations(
     current_weights: pd.Series | dict[str, float] | None = None,
     rebalance_context: RebalanceContext | None = None,
     no_trade_band: float = 0.0,
+    preserve_outside_holdings: bool = False,
 ) -> pd.DataFrame:
     result = optimizer_input.copy()
     result = _attach_forecast_semantics(result)
@@ -44,6 +45,7 @@ def build_recommendations(
     outside_rows = _current_holdings_outside_optimizer_universe(
         optimizer_input,
         outside_weights_source,
+        preserve_outside_holdings=preserve_outside_holdings,
     )
     if not outside_rows.empty:
         result = pd.concat([result, outside_rows], ignore_index=True)
@@ -94,7 +96,7 @@ def build_recommendations(
     )
     result = _attach_rebalance_plan(
         result,
-        weights,
+        _rebalance_plan_weights(weights, outside_rows, preserve_outside_holdings),
         config,
         rebalance_context,
         no_trade_band,
@@ -207,6 +209,8 @@ def build_sector_exposure(
 def _current_holdings_outside_optimizer_universe(
     optimizer_input: pd.DataFrame,
     current_weights: pd.Series | dict[str, float] | None,
+    *,
+    preserve_outside_holdings: bool,
 ) -> pd.DataFrame:
     if current_weights is None:
         return pd.DataFrame()
@@ -221,6 +225,7 @@ def _current_holdings_outside_optimizer_universe(
     outside = outside.loc[outside.gt(0)]
     if outside.empty:
         return pd.DataFrame()
+    target_weight = outside.to_numpy(dtype=float) if preserve_outside_holdings else 0.0
     return pd.DataFrame(
         {
             "ticker": outside.index,
@@ -232,11 +237,22 @@ def _current_holdings_outside_optimizer_universe(
             "expected_return_is_calibrated": False,
             "volatility": np.nan,
             "eligible_for_optimization": False,
-            "target_weight": 0.0,
+            "target_weight": target_weight,
             "current_weight": outside.to_numpy(dtype=float),
             "_outside_optimizer_universe": True,
         }
     )
+
+
+def _rebalance_plan_weights(
+    weights: pd.Series,
+    outside_rows: pd.DataFrame,
+    preserve_outside_holdings: bool,
+) -> pd.Series:
+    if not preserve_outside_holdings or outside_rows.empty:
+        return weights
+    outside_weights = outside_rows.set_index("ticker")["target_weight"].astype(float)
+    return pd.concat([weights, outside_weights]).rename("target_weight")
 
 
 def _attach_forecast_semantics(result: pd.DataFrame) -> pd.DataFrame:
