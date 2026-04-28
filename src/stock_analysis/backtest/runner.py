@@ -34,6 +34,8 @@ class BacktestConfig:
     covariance_lookback_days: int = 252
     feature_columns: tuple[str, ...] = ()
     max_rebalances: int | None = None
+    max_assets_per_rebalance: int | None = None
+    liquidity_column: str = "dollar_volume_21d"
     initial_portfolio_value: float = 1000.0
     monthly_deposit_amount: float = 0.0
     deposit_frequency_days: int = 30
@@ -130,6 +132,7 @@ def run_walk_forward_backtest(
         ].copy()
         features_at_rebalance = merged_panel.loc[merged_panel["date"] == rebalance_date].copy()
         features_at_rebalance = features_at_rebalance.dropna(subset=[realized_target_col])
+        features_at_rebalance = _limit_features_by_liquidity(features_at_rebalance, cfg)
         if train_df.empty or features_at_rebalance.empty:
             continue
 
@@ -287,6 +290,25 @@ def _select_features(frame: pd.DataFrame, config: BacktestConfig) -> pd.DataFram
         and pd.api.types.is_numeric_dtype(frame[column])
     ]
     return frame[numeric_columns]
+
+
+def _limit_features_by_liquidity(frame: pd.DataFrame, config: BacktestConfig) -> pd.DataFrame:
+    if config.max_assets_per_rebalance is None or len(frame) <= config.max_assets_per_rebalance:
+        return frame
+    if config.liquidity_column not in frame.columns:
+        msg = (
+            "cannot apply max_assets_per_rebalance; "
+            f"missing liquidity column {config.liquidity_column}"
+        )
+        raise ValueError(msg)
+    ranked = frame.assign(
+        _liquidity=pd.to_numeric(frame[config.liquidity_column], errors="coerce")
+    ).sort_values(
+        ["_liquidity", "ticker"],
+        ascending=[False, True],
+        kind="mergesort",
+    )
+    return ranked.head(config.max_assets_per_rebalance).drop(columns=["_liquidity"])
 
 
 def _optimizer_input_from_scores(features: pd.DataFrame) -> pd.DataFrame:

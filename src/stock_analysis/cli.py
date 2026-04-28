@@ -79,7 +79,7 @@ MAX_REBALANCES_OPTION = typer.Option(
 MAX_ASSETS_OPTION = typer.Option(
     None,
     "--max-assets",
-    help="Limit experiments to the latest most-liquid assets by dollar volume.",
+    help="Limit experiments to the point-in-time most-liquid assets by dollar volume.",
 )
 EXPERIMENTS_OPTION = typer.Option(
     "E0,E1,E2,E3,E4,E5,E6,E7,E8",
@@ -114,7 +114,7 @@ AUTORESEARCH_JSON_OUTPUT_OPTION = typer.Option(
 AUTORESEARCH_MAX_ASSETS_OPTION = typer.Option(
     100,
     "--max-assets",
-    help="Limit to the latest most-liquid assets by liquidity column.",
+    help="Limit each rebalance to the point-in-time most-liquid assets by liquidity column.",
 )
 AUTORESEARCH_MAX_REBALANCES_OPTION = typer.Option(
     48,

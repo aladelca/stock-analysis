@@ -513,7 +513,7 @@ def run_phase2(config: Phase2Config) -> pd.DataFrame:
     """Run Phase 2 experiments, sweeps, tracking artifacts, and markdown reports."""
 
     artifacts = _load_phase1_artifacts(config.input_run_root)
-    artifacts = _filter_artifacts_by_liquidity(artifacts, config)
+    _validate_liquidity_screen(artifacts["panel"], config.max_assets, config.liquidity_column)
     feature_columns = config.feature_columns or _default_feature_columns(artifacts["panel"])
     if not feature_columns:
         msg = "no Phase 2 feature columns are available in the panel"
@@ -1022,6 +1022,8 @@ def _backtest_config_for_spec(spec: ExperimentSpec, config: Phase2Config) -> Bac
         covariance_lookback_days=config.backtest.covariance_lookback_days,
         feature_columns=spec.feature_columns,
         max_rebalances=config.backtest.max_rebalances,
+        max_assets_per_rebalance=config.max_assets,
+        liquidity_column=config.liquidity_column,
     )
 
 
@@ -1141,30 +1143,16 @@ def _load_phase1_artifacts(run_root: Path) -> dict[str, pd.DataFrame]:
     return {name: pd.read_parquet(path) for name, path in paths.items()}
 
 
-def _filter_artifacts_by_liquidity(
-    artifacts: dict[str, pd.DataFrame],
-    config: Phase2Config,
-) -> dict[str, pd.DataFrame]:
-    if config.max_assets is None:
-        return artifacts
-    panel = artifacts["panel"]
-    if config.liquidity_column not in panel.columns:
-        msg = f"cannot apply max_assets; missing liquidity column {config.liquidity_column}"
+def _validate_liquidity_screen(
+    panel: pd.DataFrame,
+    max_assets: int | None,
+    liquidity_column: str,
+) -> None:
+    if max_assets is None:
+        return
+    if liquidity_column not in panel.columns:
+        msg = f"cannot apply max_assets; missing liquidity column {liquidity_column}"
         raise ValueError(msg)
-    latest_date = panel["date"].max()
-    top_tickers = (
-        panel.loc[panel["date"] == latest_date]
-        .sort_values(config.liquidity_column, ascending=False)
-        .head(config.max_assets)["ticker"]
-        .astype(str)
-        .tolist()
-    )
-    filtered = artifacts.copy()
-    for key in ["panel", "labels", "returns"]:
-        filtered[key] = (
-            artifacts[key].loc[artifacts[key]["ticker"].astype(str).isin(top_tickers)].copy()
-        )
-    return filtered
 
 
 def _default_feature_columns(panel: pd.DataFrame) -> tuple[str, ...]:
@@ -1309,6 +1297,10 @@ def _replace_backtest(backtest: BacktestConfig, **updates: Any) -> BacktestConfi
         ),
         feature_columns=updates.get("feature_columns", backtest.feature_columns),
         max_rebalances=updates.get("max_rebalances", backtest.max_rebalances),
+        max_assets_per_rebalance=updates.get(
+            "max_assets_per_rebalance", backtest.max_assets_per_rebalance
+        ),
+        liquidity_column=updates.get("liquidity_column", backtest.liquidity_column),
     )
 
 
@@ -1372,8 +1364,8 @@ def _write_phase2_report(
                 ),
                 (
                     "When `max_assets` is configured, experiments run on the most liquid assets "
-                    "by latest `dollar_volume_21d`; this keeps optimizer runtimes manageable and "
-                    "is explicitly part of the experiment scope."
+                    "by point-in-time `dollar_volume_21d` at each rebalance; this keeps optimizer "
+                    "runtimes manageable and is explicitly part of the experiment scope."
                 ),
                 "",
                 *_run_configuration_section(config, artifacts, backtests),
@@ -1457,7 +1449,7 @@ def _run_configuration_section(
             else 0
         )
         universe = (
-            f"top {config.max_assets} assets by latest `{config.liquidity_column}`"
+            f"top {config.max_assets} assets by point-in-time `{config.liquidity_column}`"
             if config.max_assets is not None
             else "all available assets"
         )

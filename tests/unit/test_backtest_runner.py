@@ -223,6 +223,76 @@ def test_rebalance_on_deposit_day_adds_deposit_mapped_rebalance() -> None:
     assert deposited["external_contribution"] == pytest.approx(100)
 
 
+def test_walk_forward_backtest_applies_liquidity_limit_point_in_time() -> None:
+    dates = pd.bdate_range("2025-01-01", periods=45)
+    tickers = ["AAA", "BBB", "CCC", "DDD"]
+    switch_date = dates[20]
+    panel_rows: list[dict[str, object]] = []
+    return_rows: list[dict[str, object]] = []
+    label_rows: list[dict[str, object]] = []
+    for ticker in tickers:
+        for current_date in dates:
+            early_liquidity = {"AAA": 400.0, "BBB": 300.0, "CCC": 200.0, "DDD": 100.0}
+            late_liquidity = {"AAA": 100.0, "BBB": 200.0, "CCC": 400.0, "DDD": 300.0}
+            liquidity = (
+                early_liquidity[ticker] if current_date < switch_date else late_liquidity[ticker]
+            )
+            panel_rows.append(
+                {
+                    "ticker": ticker,
+                    "date": current_date.date().isoformat(),
+                    "momentum_5d": liquidity / 1000,
+                    "volatility_21d": 0.2,
+                    "dollar_volume_21d": liquidity,
+                    "security": ticker,
+                    "gics_sector": "Sector",
+                }
+            )
+            return_rows.append(
+                {
+                    "ticker": ticker,
+                    "date": current_date.date().isoformat(),
+                    "return_1d": 0.001,
+                }
+            )
+            label_rows.append(
+                {
+                    "ticker": ticker,
+                    "date": current_date.date().isoformat(),
+                    "fwd_return_5d": 0.01,
+                }
+            )
+
+    result = run_walk_forward_backtest(
+        pd.DataFrame(panel_rows),
+        pd.DataFrame(label_rows),
+        pd.DataFrame(return_rows),
+        lambda train: MomentumModel(),
+        OptimizerConfig(max_weight=0.6, risk_aversion=0.1),
+        BacktestConfig(
+            horizon_days=5,
+            rebalance_step_days=5,
+            embargo_days=1,
+            covariance_lookback_days=5,
+            max_assets_per_rebalance=2,
+            liquidity_column="dollar_volume_21d",
+        ),
+    )
+
+    tickers_by_date = {
+        rebalance_date: set(group["ticker"])
+        for rebalance_date, group in result.groupby("rebalance_date")
+    }
+    switch_date_text = switch_date.date().isoformat()
+    early_dates = [date_value for date_value in tickers_by_date if date_value < switch_date_text]
+    late_dates = [date_value for date_value in tickers_by_date if date_value >= switch_date_text]
+
+    assert early_dates
+    assert late_dates
+    assert all(tickers_by_date[date_value] <= {"AAA", "BBB"} for date_value in early_dates)
+    assert all(tickers_by_date[date_value] <= {"CCC", "DDD"} for date_value in late_dates)
+
+
 def test_money_weighted_return_solves_simple_cashflows() -> None:
     value = money_weighted_return([(date(2025, 1, 1), -1000), (date(2026, 1, 1), 1100)])
 

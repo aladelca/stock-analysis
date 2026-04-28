@@ -30,6 +30,9 @@ uv run python scripts/autoresearch_eval.py \
 The command prints JSON and optionally appends one row to the TSV ledger. A rejected candidate is a
 valid evaluator outcome and still exits successfully.
 
+`--max-assets` is applied point-in-time at each rebalance date using the configured liquidity column.
+Do not use latest-date universe filtering for promotion evidence.
+
 ## Turnover Penalty Tuning
 
 When commission is large, tune `lambda_turnover` instead of guessing a single penalty. The tuning
@@ -134,8 +137,43 @@ Primary fields:
 
 ## Confirmation Run
 
-Before promotion, rerun the candidate with the broadest feasible rebalance coverage. Record the
-command, config, ledger row, and interpretation in `docs/experiments/autoresearch-summary.md`.
+Before promotion, rerun the candidate with the broadest feasible rebalance coverage and the
+point-in-time liquidity screen. Record the command, config, ledger row, and interpretation in
+`docs/experiments/autoresearch-summary.md`.
+
+The current broad production-economics validation command is:
+
+```bash
+uv run --extra mlflow stock-analysis autoresearch-eval \
+  --candidate e8_scale_0p5 \
+  --input-run-root data/runs/phase2-source-20260424 \
+  --max-assets 100 \
+  --max-rebalances 241 \
+  --optimizer-max-weight 0.30 \
+  --risk-aversion 10 \
+  --min-trade-weight 0.005 \
+  --lambda-turnover 5.0 \
+  --commission-rate 0.02 \
+  --initial-portfolio-value 1000 \
+  --monthly-deposit-amount 100 \
+  --deposit-frequency-days 30 \
+  --rebalance-on-deposit-day \
+  --no-trade-band 0.02 \
+  --horizon-days 5 \
+  --rebalance-step-days 5 \
+  --embargo-days 15 \
+  --covariance-lookback-days 252 \
+  --iteration-id e8-scale-0p5-production-pit-broad-$(date +%Y%m%d) \
+  --results-tsv experiments/autoresearch/results.tsv \
+  --json-output docs/experiments/e8-scale-0p5-production-pit-broad-$(date +%Y%m%d).json
+```
+
+For an account-size sensitivity that starts with $300 and then applies the same monthly deposits,
+change only `--initial-portfolio-value 300` and use an iteration id that includes `user300`.
+
+The 2026-04-28 corrected PIT broad run kept `e8_scale_0p5` as the best risk-adjusted candidate among
+the tested production-economics variants, but only as `provisional`. It beat SPY on ending-value point
+estimates, not on a statistically confirmed Sharpe-difference gate.
 
 ## Promotion
 

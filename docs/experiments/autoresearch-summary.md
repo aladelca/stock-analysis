@@ -13,9 +13,9 @@ flattened parameters, portfolio metrics, decision tags, and the append-only TSV 
 The ledger at `experiments/autoresearch/results.tsv` remains the audit source for promotion
 decisions.
 
-Fast-loop evaluations use `data/runs/phase2-source-20260424`, the latest top 100 assets by
-`dollar_volume_21d`, 5-trading-day forward targets, 48 requested rebalances, 5 bps transaction
-costs, a 0.30 optimizer max-weight cap, and the turnover-aware optimizer.
+Fast-loop evaluations use `data/runs/phase2-source-20260424`, the point-in-time top 100 assets by
+`dollar_volume_21d` at each rebalance, 5-trading-day forward targets, 48 requested rebalances,
+5 bps transaction costs, a 0.30 optimizer max-weight cap, and the turnover-aware optimizer.
 
 ## Baseline
 
@@ -120,7 +120,35 @@ Artifact:
 The one-shot ML flow is configured as `e8-scale-0p5-contribution-aware-v1`, which keeps the E8 Ridge
 plus LightGBM blend and applies `ml_score_scale=0.5` before optimization.
 
+### 2026-04-28 PIT Broad Validation
+
+The 2026-04-28 validation removes the latest-liquidity lookahead from `max_assets`: each rebalance is
+limited to the top 100 assets by `dollar_volume_21d` known on that rebalance date. This broader
+validation requested 241 rebalance/deposit dates and produced 236 aligned SPY observations.
+
+| Candidate | Status | Ending Value | SPY Ending Value | Sharpe | SPY Sharpe | SPY-Relative IR | CI Low | Total Commissions |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `e8_baseline` | rejected | $15,454.58 | $10,045.59 | 0.939092 | 1.139604 | 0.670123 | -1.084678 | $2,210.09 |
+| `e8_scale_0p5` | provisional | $14,575.13 | $10,045.59 | 1.212379 | 1.139604 | 0.763414 | -0.675658 | $387.52 |
+| `e8_weight_ridge_1p2_lgbm_0p8_scale_1p20` | rejected | $16,763.22 | $10,045.59 | 0.991536 | 1.139604 | 0.739829 | -1.140419 | $3,040.39 |
+
+Artifacts:
+`docs/experiments/e8-baseline-production-pit-broad-20260428.json`,
+`docs/experiments/e8-scale-0p5-production-pit-broad-20260428.json`, and
+`docs/experiments/e8-weight-ridge-1p2-lgbm-0p8-scale-1p20-production-pit-broad-20260428.json`.
+
+Account-size sensitivity with `initial_portfolio_value=300` keeps the same conclusion. The
+`e8_scale_0p5` strategy ended at $11,288.79 versus the same-deposit SPY value of $8,490.87, but its
+Sharpe was 1.138959 versus SPY at 1.139604, so the evaluator rejected it for the strict SPY Sharpe
+gate. Artifact: `docs/experiments/e8-scale-0p5-user300-pit-broad-20260428.json`.
+
+Decision: keep `e8_scale_0p5` as the best current production candidate because it has the best
+risk-adjusted profile among the tested production-economics candidates and much lower commission drag
+than the alternatives. Do not claim a scientifically confirmed SPY beat yet. The corrected evidence
+supports "beats SPY on ending-value point estimates under the tested deposit schedule"; it does not
+support production copy or dashboards that state the model has conclusively beaten SPY.
+
 CatBoost is now available for continued experimentation, but the first CatBoost batches do not
-justify replacing the Ridge plus LightGBM production path. The next highest-value tests are broader
-rebalance coverage for `e8_scale_0p5` and point-in-time universe/liquidity validation before a
-production promotion is considered durable.
+justify replacing the Ridge plus LightGBM production path. The next highest-value work is a
+cost-aware/deposit-aware model search under the PIT validation contract and a historical constituent
+universe so the validation is not limited to the current S&P 500 membership.

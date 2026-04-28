@@ -114,7 +114,7 @@ def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
     candidate = get_candidate(config.candidate_id)
     horizon_days = config.horizon_days or candidate.horizon_days
     artifacts = _load_phase1_artifacts(config.input_run_root)
-    artifacts = _filter_artifacts_by_liquidity(artifacts, config)
+    _validate_liquidity_screen(artifacts["panel"], config.max_assets, config.liquidity_column)
     panel = artifacts["panel"]
     feature_columns = resolve_feature_columns(panel, candidate)
     backtest = run_walk_forward_backtest(
@@ -140,6 +140,8 @@ def evaluate_candidate(config: AutoresearchEvalConfig) -> dict[str, Any]:
             covariance_lookback_days=config.covariance_lookback_days,
             feature_columns=feature_columns,
             max_rebalances=config.max_rebalances,
+            max_assets_per_rebalance=config.max_assets,
+            liquidity_column=config.liquidity_column,
             initial_portfolio_value=config.initial_portfolio_value,
             monthly_deposit_amount=config.monthly_deposit_amount,
             deposit_frequency_days=config.deposit_frequency_days,
@@ -450,31 +452,16 @@ def _load_phase1_artifacts(run_root: Path) -> dict[str, pd.DataFrame]:
     return {name: pd.read_parquet(path) for name, path in paths.items()}
 
 
-def _filter_artifacts_by_liquidity(
-    artifacts: dict[str, pd.DataFrame],
-    config: AutoresearchEvalConfig,
-) -> dict[str, pd.DataFrame]:
-    if config.max_assets is None:
-        return artifacts
-    panel = artifacts["panel"]
-    if config.liquidity_column not in panel.columns:
-        msg = f"cannot apply max_assets; missing liquidity column {config.liquidity_column}"
+def _validate_liquidity_screen(
+    panel: pd.DataFrame,
+    max_assets: int | None,
+    liquidity_column: str,
+) -> None:
+    if max_assets is None:
+        return
+    if liquidity_column not in panel.columns:
+        msg = f"cannot apply max_assets; missing liquidity column {liquidity_column}"
         raise ValueError(msg)
-    latest_date = pd.to_datetime(panel["date"]).max()
-    dated_panel = panel.assign(_date=pd.to_datetime(panel["date"]))
-    top_tickers = (
-        dated_panel.loc[dated_panel["_date"] == latest_date]
-        .sort_values(config.liquidity_column, ascending=False)
-        .head(config.max_assets)["ticker"]
-        .astype(str)
-        .tolist()
-    )
-    filtered = artifacts.copy()
-    for key in ["panel", "labels", "returns"]:
-        filtered[key] = (
-            artifacts[key].loc[artifacts[key]["ticker"].astype(str).isin(top_tickers)].copy()
-        )
-    return filtered
 
 
 def _benchmark_for_horizon(benchmark: pd.DataFrame, horizon_days: int) -> pd.DataFrame:
