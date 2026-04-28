@@ -23,6 +23,7 @@ build/
 # Local data and generated Tableau outputs
 data/
 mlruns/
+supabase/.temp/
 tableau_prep_outputs/
 *.hyper
 *.tde

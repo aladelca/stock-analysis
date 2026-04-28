@@ -10,9 +10,26 @@ Install the optional Supabase client extra:
 uv sync --extra supabase
 ```
 
-Apply the SQL migrations in `supabase/migrations/` through your Supabase project, or with the Supabase CLI if you manage migrations there.
+For local-only development, start the local Supabase stack and apply the local migrations:
 
-Set credentials in `.env` or your shell:
+```bash
+supabase start
+supabase db reset
+supabase status
+```
+
+Do not run `supabase link` or `supabase db push` for local-only work. `supabase db reset` recreates the local database and applies the SQL files in `supabase/migrations/`, so it will wipe local Supabase data.
+
+Set local credentials in `.env` or your shell from `supabase status`:
+
+```bash
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_SERVICE_ROLE_KEY=<service_role_key_from_supabase_status>
+```
+
+For a remote Supabase project, apply the SQL migrations in `supabase/migrations/` through your Supabase project, or with the Supabase CLI after linking the project.
+
+Remote credentials look like this:
 
 ```bash
 SUPABASE_URL=https://<project-ref>.supabase.co
@@ -35,6 +52,12 @@ supabase:
   enabled: true
   url_env: SUPABASE_URL
   key_env: SUPABASE_SERVICE_ROLE_KEY
+```
+
+For a local config copy:
+
+```bash
+cp -f configs/portfolio.yaml configs/portfolio.local.yaml
 ```
 
 ## Register The Account
