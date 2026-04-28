@@ -39,7 +39,7 @@ forecast:
   label_horizons: [5, 21, 63]
   ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
-  ml_max_assets: 100
+  ml_max_assets: null
   ml_score_scale: 1.0
   ml_lightgbm_nested_cv: false
   ml_lightgbm_inner_folds: 2

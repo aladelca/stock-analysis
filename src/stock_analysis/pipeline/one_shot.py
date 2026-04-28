@@ -510,6 +510,7 @@ def _persist_account_tracking_outputs(
             model_version=_required_str(metadata.get("model_version"), "model_version"),
             ml_score_scale=float(config.forecast.ml_score_scale),
             config_hash=_required_str(metadata.get("config_hash"), "config_hash"),
+            ml_max_assets=_optional_int(metadata.get("ml_max_assets")),
             expected_return_is_calibrated=_optional_bool(
                 metadata.get("expected_return_is_calibrated")
             )
@@ -743,6 +744,7 @@ def _build_run_metadata(
             else "score"
         ),
         "calibration_enabled": config.forecast.ml_calibration_enabled,
+        "ml_max_assets": config.forecast.ml_max_assets,
         "calibration_method": calibration.get("calibration_method", ""),
         "calibration_target": calibration.get("calibration_target", ""),
         "calibration_model_version": (

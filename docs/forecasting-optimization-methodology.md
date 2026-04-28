@@ -165,8 +165,9 @@ The calibrated ML path fits the forecasting model in blocked out-of-sample folds
 isotonic score-to-return calibrator on an earlier calibration split and validates it on a later
 calendar-date holdout. A run is promoted to calibrated only when it has enough total observations,
 enough validation observations, and passes the configured rank-IC/MAE/RMSE quality gates.
-Calibration folds use point-in-time liquidity filtering by date when `forecast.ml_max_assets` is set,
-so historical diagnostics are not selected by the latest-date liquidity universe.
+The default live ML path uses the full eligible universe. Calibration folds use point-in-time
+liquidity filtering by date only when `forecast.ml_max_assets` is set to a positive integer, so
+historical diagnostics are not selected by the latest-date liquidity universe.
 
 ### Eligibility Filter
 

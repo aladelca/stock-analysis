@@ -83,7 +83,7 @@ forecast:
   engine: ml
   ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
-  ml_max_assets: 100
+  ml_max_assets: null
   ml_score_scale: 1.0
   ml_min_active_expected_return_vs_benchmark: 0.001
 
@@ -129,6 +129,8 @@ Notes:
 - `run_id: null` lets the pipeline generate a UTC run id.
 - `forecast.ml_model_version: lightgbm_return_zscore` uses the best researched PIT
   production-economics candidate from `docs/experiments/autoresearch-summary.md`.
+- `forecast.ml_max_assets: null` uses the full eligible universe. Set a positive integer to cap
+  the ML universe by latest 21-day dollar volume.
 - `forecast.ml_score_scale: 1.0` keeps the candidate's z-scored forecast scale unchanged.
 - `forecast.ml_min_active_expected_return_vs_benchmark: 0.001` requires a non-benchmark buy
   candidate to have a calibrated 5-trading-day expected return at least 10 bps above SPY.
@@ -408,7 +410,7 @@ forecast:
   engine: ml
   ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
-  ml_max_assets: 100
+  ml_max_assets: null
   ml_score_scale: 1.0
   ml_calibration_enabled: true
   ml_calibration_min_observations: 200
@@ -527,7 +529,7 @@ forecast:
   engine: ml
   ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
-  ml_max_assets: 100
+  ml_max_assets: null
   ml_score_scale: 1.0
   ml_min_active_expected_return_vs_benchmark: 0.001
 

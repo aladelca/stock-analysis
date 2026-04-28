@@ -169,6 +169,7 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
             model_version="e8-scale-0p5-contribution-aware-v1",
             ml_score_scale=0.5,
             config_hash="abc123",
+            ml_max_assets=100,
             expected_return_is_calibrated=True,
             optimizer_return_unit="5d_return",
             calibration_enabled=True,
@@ -220,6 +221,7 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
 
     assert run.id == "recommendation_runs-1"
     assert run.expected_return_is_calibrated is True
+    assert run.ml_max_assets == 100
     assert run.optimizer_return_unit == "5d_return"
     assert run.calibration_enabled is True
     assert run.calibration_status == "calibrated"
@@ -228,6 +230,7 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
     assert run.calibration_mae == pytest.approx(0.015)
     assert run.min_active_expected_return_vs_benchmark == pytest.approx(0.001)
     assert client.tables["recommendation_runs"][0]["calibration_method"] == "isotonic"
+    assert client.tables["recommendation_runs"][0]["ml_max_assets"] == 100
     assert (
         client.tables["recommendation_runs"][0]["min_active_expected_return_vs_benchmark"] == 0.001
     )

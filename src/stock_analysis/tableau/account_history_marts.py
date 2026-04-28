@@ -146,6 +146,7 @@ def _recommendation_lines_history_frame(
                 "run_data_as_of_date",
                 "model_version",
                 "ml_score_scale",
+                "ml_max_assets",
                 "config_hash",
                 "run_expected_return_is_calibrated",
                 "optimizer_return_unit",

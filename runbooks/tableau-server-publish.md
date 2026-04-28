@@ -34,7 +34,7 @@ forecast:
   engine: ml
   ml_model_version: lightgbm_return_zscore
   ml_horizon_days: 5
-  ml_max_assets: 100
+  ml_max_assets: null
   ml_score_scale: 1.0
   ml_min_active_expected_return_vs_benchmark: 0.001
 

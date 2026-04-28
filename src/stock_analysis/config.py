@@ -76,7 +76,7 @@ class ForecastConfig(BaseModel):
     label_horizons: list[int] = Field(default_factory=lambda: [5, 21, 63])
     ml_model_version: str = "lightgbm_return_zscore"
     ml_horizon_days: int = Field(default=5, ge=1)
-    ml_max_assets: int | None = Field(default=100, ge=1)
+    ml_max_assets: int | None = Field(default=None, ge=1)
     ml_feature_columns: list[str] = Field(default_factory=list)
     ml_score_scale: float = Field(default=1.0, gt=0)
     ml_lightgbm_nested_cv: bool = False

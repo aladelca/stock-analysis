@@ -72,6 +72,7 @@ class RecommendationRunRecord:
     model_version: str
     ml_score_scale: float
     config_hash: str
+    ml_max_assets: int | None = None
     expected_return_is_calibrated: bool = False
     optimizer_return_unit: str | None = None
     calibration_enabled: bool = False

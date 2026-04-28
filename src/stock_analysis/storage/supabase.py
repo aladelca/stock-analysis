@@ -410,6 +410,7 @@ def _recommendation_run_from_row(row: Mapping[str, Any]) -> RecommendationRunRec
         model_version=str(row["model_version"]),
         ml_score_scale=float(row["ml_score_scale"]),
         config_hash=str(row["config_hash"]),
+        ml_max_assets=_optional_int(row.get("ml_max_assets")),
         expected_return_is_calibrated=_optional_bool(row.get("expected_return_is_calibrated"))
         or False,
         optimizer_return_unit=_optional_str(row.get("optimizer_return_unit")),
