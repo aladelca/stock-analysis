@@ -55,10 +55,11 @@ Live account history inputs, when Supabase-backed account tracking is enabled:
 8. Add calculated fields:
    - `current_weight = IFNULL([current_weight], 0)`
    - `target_weight = IFNULL([target_weight], 0)`
+   - `executable_target_weight = IFNULL([executable_target_weight], [target_weight])`
    - `trade_weight = IFNULL([trade_weight], 0)`
    - `trade_abs_weight = IFNULL([trade_abs_weight], ABS([trade_weight]))`
-   - `is_solver_dust = [target_weight] > 0 AND [target_weight] < 0.00000001`
-   - `display_target_weight = IF [is_solver_dust] THEN 0 ELSE [target_weight] END`
+   - `is_solver_dust = [executable_target_weight] > 0 AND [executable_target_weight] < 0.00000001`
+   - `display_target_weight = IF [is_solver_dust] THEN 0 ELSE [executable_target_weight] END`
    - `display_current_weight = IF ABS([current_weight]) < 0.00000001 THEN 0 ELSE [current_weight] END`
    - `display_trade_weight = IF ABS([trade_weight]) < 0.00000001 THEN 0 ELSE [trade_weight] END`
    - `rebalance_required = IFNULL([rebalance_required], false)`
@@ -70,6 +71,7 @@ Live account history inputs, when Supabase-backed account tracking is enabled:
    - `selected = [display_target_weight] > 0`
    - `current_weight_label = STR(ROUND([current_weight] * 100, 2)) + "%"`
    - `target_weight_label = STR(ROUND([target_weight] * 100, 2)) + "%"`
+   - `executable_target_weight_label = STR(ROUND([display_target_weight] * 100, 2)) + "%"`
    - `trade_weight_label = STR(ROUND([trade_weight] * 100, 2)) + "%"`
    - `estimated_commission_weight_label = STR(ROUND([estimated_commission_weight] * 100, 2)) + "%"`
    - `scatter_size = IF [selected] THEN [display_target_weight] ELSE 0.001 END`
@@ -112,8 +114,11 @@ one row per recommendation ticker per run
 - `display_current_weight`
 - `current_weight_label`
 - `target_weight`
+- `executable_target_weight`
+- `executable_target_market_value`
 - `display_target_weight`
 - `target_weight_label`
+- `executable_target_weight_label`
 - `trade_weight`
 - `display_trade_weight`
 - `trade_abs_weight`
@@ -183,8 +188,9 @@ Use these table grains in Tableau:
 
 - Row count equals `portfolio_recommendations` row count.
 - `selected` is true for selected assets and false for excluded assets.
-- `SUM(target_weight)` over all rows is approximately `1.0`.
-- `SUM(target_weight)` where `selected = true` is approximately `1.0`.
+- `SUM(target_weight)` over all rows is approximately `1.0` for the raw optimizer target.
+- `SUM(display_target_weight)` where `selected = true` is no higher than `1.0` except for rounding;
+  it can be lower when no-trade-band or cash-limit rules leave residual cash.
 - Solver-dust rows below the dashboard tolerance have `is_solver_dust = true` and
   `selected = false`.
 - `estimated_commission_weight` equals `0.02 * trade_abs_weight` for BUY/SELL rows in the default

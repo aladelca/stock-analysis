@@ -39,6 +39,7 @@
       <column datatype="string" name="[outcome_status]" role="dimension" type="nominal" caption="Outcome Status"/>
       <column datatype="real" name="[volatility]" role="measure" type="quantitative" caption="Volatility"/>
       <column datatype="real" name="[target_weight]" role="measure" type="quantitative" caption="Target Weight"/>
+      <column datatype="real" name="[executable_target_weight]" role="measure" type="quantitative" caption="Executable Target Weight"/>
       <column datatype="real" name="[display_target_weight]" role="measure" type="quantitative" caption="Display Target Weight"/>
       <column datatype="real" name="[current_weight]" role="measure" type="quantitative" caption="Current Weight"/>
       <column datatype="real" name="[display_current_weight]" role="measure" type="quantitative" caption="Display Current Weight"/>
@@ -54,6 +55,7 @@
       <column datatype="real" name="[contribution_amount]" role="measure" type="quantitative" caption="Contribution Amount"/>
       <column datatype="real" name="[current_market_value]" role="measure" type="quantitative" caption="Current Market Value"/>
       <column datatype="real" name="[target_market_value]" role="measure" type="quantitative" caption="Target Market Value"/>
+      <column datatype="real" name="[executable_target_market_value]" role="measure" type="quantitative" caption="Executable Target Market Value"/>
       <column datatype="real" name="[trade_notional]" role="measure" type="quantitative" caption="Trade Notional"/>
       <column datatype="real" name="[commission_amount]" role="measure" type="quantitative" caption="Commission Amount"/>
       <column datatype="real" name="[deposit_used_amount]" role="measure" type="quantitative" caption="Deposit Used Amount"/>
@@ -64,6 +66,7 @@
       <column datatype="string" name="[commission_amount_label]" role="dimension" type="nominal" caption="Commission Amount Label"/>
       <column datatype="string" name="[current_weight_label]" role="dimension" type="nominal" caption="Current Weight Label"/>
       <column datatype="string" name="[target_weight_label]" role="dimension" type="nominal" caption="Target Weight Label"/>
+      <column datatype="string" name="[executable_target_weight_label]" role="dimension" type="nominal" caption="Executable Target Weight Label"/>
       <column datatype="string" name="[trade_weight_label]" role="dimension" type="nominal" caption="Trade Weight Label"/>
       <column datatype="string" name="[estimated_commission_weight_label]" role="dimension" type="nominal" caption="Estimated Commission Weight Label"/>
       <column datatype="boolean" name="[selected]" role="dimension" type="nominal" caption="Selected"/>
@@ -89,7 +92,18 @@
       <column datatype="string" name="[run_created_at_utc]" role="dimension" type="nominal" caption="Run Created At UTC"/>
       <column datatype="string" name="[run_config_hash]" role="dimension" type="nominal" caption="Run Config Hash"/>
       <column datatype="string" name="[run_config_hash_short]" role="dimension" type="nominal" caption="Config Hash"/>
-      <column datatype="string" name="[run_expected_return_is_calibrated]" role="dimension" type="nominal" caption="Run Expected Return Is Calibrated"/>
+      <column datatype="boolean" name="[run_expected_return_is_calibrated]" role="dimension" type="nominal" caption="Run Expected Return Is Calibrated"/>
+      <column datatype="string" name="[run_optimizer_return_unit]" role="dimension" type="nominal" caption="Optimizer Return Unit"/>
+      <column datatype="boolean" name="[run_calibration_enabled]" role="dimension" type="nominal" caption="Calibration Enabled"/>
+      <column datatype="string" name="[run_calibration_method]" role="dimension" type="nominal" caption="Calibration Method"/>
+      <column datatype="string" name="[run_calibration_target]" role="dimension" type="nominal" caption="Calibration Target"/>
+      <column datatype="string" name="[run_calibration_model_version]" role="dimension" type="nominal" caption="Calibration Model Version"/>
+      <column datatype="string" name="[run_calibration_status]" role="dimension" type="nominal" caption="Calibration Status"/>
+      <column datatype="date" name="[run_calibration_trained_through_date]" role="dimension" type="nominal" caption="Calibration Trained Through Date"/>
+      <column datatype="integer" name="[run_calibration_observations]" role="measure" type="quantitative" caption="Calibration Observations"/>
+      <column datatype="real" name="[run_calibration_mae]" role="measure" type="quantitative" caption="Calibration MAE"/>
+      <column datatype="real" name="[run_calibration_rmse]" role="measure" type="quantitative" caption="Calibration RMSE"/>
+      <column datatype="real" name="[run_calibration_rank_ic]" role="measure" type="quantitative" caption="Calibration Rank IC"/>
       <column datatype="string" name="[portfolio_footer_label]" role="dimension" type="nominal" caption="Portfolio Footer Label">
         <calculation class="tableau" formula="&quot;Run &quot; + STR([run_id]) + &quot; | requested &quot; + STR([run_requested_as_of_date]) + &quot; | data &quot; + STR([run_data_as_of_date]) + &quot; | &quot; + STR([data_date_status]) + &quot; | config &quot; + STR([run_config_hash_short])"/>
       </column>
@@ -103,7 +117,7 @@
         <calculation class="tableau" formula="IF [selected] THEN [display_target_weight] END"/>
       </column>
       <column datatype="string" name="[holding_weight_label]" role="dimension" type="nominal" caption="Holding Weight Label">
-        <calculation class="tableau" formula="IF [selected] THEN [target_weight_label] END"/>
+        <calculation class="tableau" formula="IF [selected] THEN [executable_target_weight_label] END"/>
       </column>
       <column datatype="string" name="[trade_ticker]" role="dimension" type="nominal" caption="Trade Ticker">
         <calculation class="tableau" formula="IF [rebalance_required] THEN [ticker] END"/>
@@ -310,8 +324,8 @@
             <datasource caption="portfolio_dashboard_mart" name="federated.portfolio_dashboard_mart"/>
           </datasources>
           <datasource-dependencies datasource="federated.portfolio_dashboard_mart">
-            <column datatype="real" name="[target_weight]" role="measure" type="quantitative" caption="Target Weight"/>
-            <column-instance column="[target_weight]" derivation="Sum" name="[sum:target_weight:qk]" pivot="key" type="quantitative"/>
+            <column datatype="real" name="[display_target_weight]" role="measure" type="quantitative" caption="Display Target Weight"/>
+            <column-instance column="[display_target_weight]" derivation="Sum" name="[sum:display_target_weight:qk]" pivot="key" type="quantitative"/>
           </datasource-dependencies>
           <aggregation value="true"/>
         </view>
@@ -323,7 +337,7 @@
             </view>
             <mark class="Text"/>
             <encodings>
-              <text column="[federated.portfolio_dashboard_mart].[sum:target_weight:qk]"/>
+              <text column="[federated.portfolio_dashboard_mart].[sum:display_target_weight:qk]"/>
             </encodings>
             <style>
               <style-rule element="mark">
@@ -356,7 +370,7 @@
               <calculation class="tableau" formula="IF [selected] THEN [display_target_weight] END"/>
             </column>
             <column datatype="string" name="[holding_weight_label]" role="dimension" type="nominal" caption="Holding Weight Label">
-              <calculation class="tableau" formula="IF [selected] THEN [target_weight_label] END"/>
+              <calculation class="tableau" formula="IF [selected] THEN [executable_target_weight_label] END"/>
             </column>
             <column datatype="string" name="[reason_code]" role="dimension" type="nominal" caption="Reason Code"/>
             <column-instance column="[holding_ticker]" derivation="None" name="[none:holding_ticker:nk]" pivot="key" type="nominal"/>
@@ -453,11 +467,11 @@
             <datasource caption="portfolio_dashboard_mart" name="federated.portfolio_dashboard_mart"/>
           </datasources>
           <datasource-dependencies datasource="federated.portfolio_dashboard_mart">
+            <column datatype="real" name="[display_target_weight]" role="measure" type="quantitative" caption="Display Target Weight"/>
             <column datatype="string" name="[gics_sector]" role="dimension" type="nominal" caption="GICS Sector"/>
             <column datatype="real" name="[sector_target_weight]" role="measure" type="quantitative" caption="Sector Target Weight"/>
-            <column datatype="real" name="[target_weight]" role="measure" type="quantitative" caption="Target Weight"/>
             <column-instance column="[gics_sector]" derivation="None" name="[none:gics_sector:nk]" pivot="key" type="nominal"/>
-            <column-instance column="[target_weight]" derivation="Sum" name="[sum:target_weight:qk]" pivot="key" type="quantitative"/>
+            <column-instance column="[display_target_weight]" derivation="Sum" name="[sum:display_target_weight:qk]" pivot="key" type="quantitative"/>
             <column-instance column="[sector_target_weight]" derivation="Max" name="[max:sector_target_weight:qk]" pivot="key" type="quantitative"/>
           </datasource-dependencies>
           <aggregation value="true"/>
@@ -471,7 +485,7 @@
             <mark class="Square"/>
             <encodings>
               <color column="[federated.portfolio_dashboard_mart].[none:gics_sector:nk]"/>
-              <size column="[federated.portfolio_dashboard_mart].[sum:target_weight:qk]"/>
+              <size column="[federated.portfolio_dashboard_mart].[sum:display_target_weight:qk]"/>
               <text column="[federated.portfolio_dashboard_mart].[none:gics_sector:nk]"/>
               <tooltip column="[federated.portfolio_dashboard_mart].[max:sector_target_weight:qk]"/>
             </encodings>

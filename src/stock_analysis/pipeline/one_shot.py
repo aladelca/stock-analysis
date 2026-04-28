@@ -579,6 +579,8 @@ def _recommendation_line_record(
         gics_sector=_optional_str(row.get("gics_sector")),
         current_weight=_optional_float(row.get("current_weight")),
         target_weight=_optional_float(row.get("target_weight")),
+        executable_target_weight=_optional_float(row.get("executable_target_weight")),
+        executable_target_market_value=_optional_float(row.get("executable_target_market_value")),
         trade_weight=_optional_float(row.get("trade_weight")),
         trade_notional=_optional_float(row.get("trade_notional")),
         commission_amount=_optional_float(row.get("commission_amount")),

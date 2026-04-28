@@ -33,12 +33,19 @@ def build_dashboard_mart(
     if "calibrated_expected_return" not in mart.columns:
         mart["calibrated_expected_return"] = pd.NA
     target_weight = pd.to_numeric(mart["target_weight"], errors="coerce").fillna(0.0)
+    executable_target_weight = pd.to_numeric(
+        mart.get("executable_target_weight", target_weight),
+        errors="coerce",
+    ).fillna(target_weight)
     current_weight = pd.to_numeric(mart["current_weight"], errors="coerce").fillna(0.0)
     trade_weight = pd.to_numeric(mart["trade_weight"], errors="coerce").fillna(0.0)
-    mart["is_solver_dust"] = target_weight.abs().gt(0) & target_weight.abs().lt(
-        DASHBOARD_WEIGHT_EPSILON
-    )
-    mart["display_target_weight"] = target_weight.mask(mart["is_solver_dust"], 0.0)
+    mart["executable_target_weight"] = executable_target_weight
+    if "executable_target_market_value" not in mart.columns:
+        mart["executable_target_market_value"] = pd.NA
+    mart["is_solver_dust"] = executable_target_weight.abs().gt(
+        0
+    ) & executable_target_weight.abs().lt(DASHBOARD_WEIGHT_EPSILON)
+    mart["display_target_weight"] = executable_target_weight.mask(mart["is_solver_dust"], 0.0)
     mart["display_current_weight"] = current_weight.mask(
         current_weight.abs().lt(DASHBOARD_WEIGHT_EPSILON),
         0.0,
@@ -49,6 +56,9 @@ def build_dashboard_mart(
     )
     mart["selected"] = mart["display_target_weight"].gt(0)
     mart["target_weight_label"] = mart["target_weight"].map(lambda value: f"{float(value):.2%}")
+    mart["executable_target_weight_label"] = mart["display_target_weight"].map(
+        lambda value: f"{float(value):.2%}"
+    )
     mart["current_weight_label"] = mart["current_weight"].map(lambda value: f"{float(value):.2%}")
     mart["trade_weight_label"] = mart["trade_weight"].map(lambda value: f"{float(value):+.2%}")
     mart["estimated_commission_weight_label"] = mart["estimated_commission_weight"].map(
@@ -77,8 +87,11 @@ def build_dashboard_mart(
         {True: "Market data date differs from requested run date", False: "Current requested date"}
     )
 
-    sector_weights = sector_exposure.set_index("gics_sector")["target_weight"]
-    mart["sector_target_weight"] = mart["gics_sector"].map(sector_weights).fillna(0.0)
+    del sector_exposure
+    sector_weights = mart.groupby("gics_sector", dropna=False)["display_target_weight"].transform(
+        "sum"
+    )
+    mart["sector_target_weight"] = sector_weights.fillna(0.0)
     mart = _coerce_date_columns(
         mart,
         [
@@ -114,8 +127,10 @@ def build_dashboard_mart(
         "display_current_weight",
         "current_weight_label",
         "target_weight",
+        "executable_target_weight",
         "display_target_weight",
         "target_weight_label",
+        "executable_target_weight_label",
         "trade_weight",
         "display_trade_weight",
         "trade_abs_weight",
@@ -131,6 +146,7 @@ def build_dashboard_mart(
         "portfolio_value_after_contribution",
         "current_market_value",
         "target_market_value",
+        "executable_target_market_value",
         "trade_notional",
         "trade_notional_label",
         "commission_amount",
@@ -195,7 +211,10 @@ def build_dashboard_mart(
             mart[column] = pd.NA
     return (
         mart[column_order]
-        .sort_values(["rebalance_required", "trade_abs_weight", "target_weight"], ascending=False)
+        .sort_values(
+            ["rebalance_required", "trade_abs_weight", "display_target_weight"],
+            ascending=False,
+        )
         .reset_index(drop=True)
     )
 

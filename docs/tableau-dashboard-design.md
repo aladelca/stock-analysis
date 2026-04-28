@@ -42,8 +42,8 @@ Selected holdings have:
 
 ```text
 selected = true
-action = BUY
-target_weight > 0
+action in BUY, SELL, HOLD
+display_target_weight > 0
 ```
 
 Excluded tickers have:
@@ -51,7 +51,7 @@ Excluded tickers have:
 ```text
 selected = false
 action = EXCLUDE
-target_weight = 0 or below display threshold
+display_target_weight = 0 or below display threshold
 ```
 
 ## Layout
@@ -66,7 +66,7 @@ Use a single dashboard, fixed at `1280 x 850` for the generated base workbook.
 │ HOLDINGS TABLE                            │ SECTOR TREEMAP              │
 │ ticker · security · sector · weight bar   │ sector exposure             │
 │ forecast_score · volatility · action      │                             │
-│ sorted by target_weight desc              ├─────────────────────────────┤
+│ sorted by executable target desc          ├─────────────────────────────┤
 │                                           │                             │
 │                                           │ RISK / FORECAST SCATTER     │
 │                                           │ x=volatility                │
@@ -98,13 +98,13 @@ Create six single-value sheets.
 | Portfolio forecast score | `MAX([portfolio_expected_return])` |
 | Portfolio volatility | `MAX([portfolio_expected_volatility])` |
 | Return/vol | `MAX([portfolio_return_per_vol])` |
-| Weight sum | `SUM([target_weight])` |
+| Executable weight sum | `SUM([display_target_weight])` |
 
 Formatting:
 
 - Use two decimals for score and volatility.
 - Use percentage format for target weights.
-- Color weight sum green when it is within `[0.999, 1.001]`; otherwise red.
+- Color executable weight sum green when it is within `[0, 1.001]`; otherwise red.
 - If `is_data_date_lagged` is true, show a small warning marker near the data-as-of tile.
 
 ## Holdings Table
@@ -123,8 +123,9 @@ Rows:
 
 Displayed measures:
 
-- `target_weight` as a horizontal bar.
-- `target_weight_label` as text.
+- `display_target_weight` as a horizontal bar.
+- `executable_target_weight_label` as text.
+- `target_weight` in tooltip as the raw optimizer target.
 - `forecast_score`, formatted to two decimals, plus calibrated expected return in percent when
   available.
 - `volatility`, formatted to two decimals.
@@ -134,7 +135,7 @@ Displayed measures:
 Sort:
 
 ```text
-target_weight desc
+display_target_weight desc
 ```
 
 Default visible rows:
@@ -156,19 +157,19 @@ gics_sector
 Size:
 
 ```text
-SUM([target_weight])
+SUM([display_target_weight])
 ```
 
 Color:
 
 ```text
-SUM([target_weight])
+SUM([display_target_weight])
 ```
 
 Tooltip:
 
 - `gics_sector`
-- `SUM(target_weight)`
+- `SUM(display_target_weight)`
 - `MAX(sector_target_weight)`
 
 Do not use `SUM([sector_target_weight])` because that field is repeated on each ticker row.
@@ -241,6 +242,9 @@ For holdings and scatter marks, include:
 - Current holdings must be supplied for true sell/hold semantics. Without a holdings file, the run
   is first-allocation mode and most selected assets appear as BUY.
 - EXCLUDE means no current position and no target allocation.
+- `target_weight` is the raw optimizer target. Use `display_target_weight` or
+  `executable_target_weight` for holdings and sector visuals because no-trade-band rows can be
+  suppressed while retaining a nonzero optimizer target.
 - `forecast_score` should not be labeled as a predicted percentage return. Use
   `calibrated_expected_return` for expected-return labels only when the run calibration status is
   `calibrated`.
@@ -255,9 +259,9 @@ For holdings and scatter marks, include:
 ## Validation Checklist
 
 - [ ] KPI strip renders six non-null tiles.
-- [ ] `SUM([target_weight])` reads approximately `1.00`.
+- [ ] `SUM([display_target_weight])` is nonnegative and no higher than `1.00` except for rounding.
 - [ ] Holdings table only shows `selected = true`.
-- [ ] Treemap sector weights sum to approximately `1.00`.
+- [ ] Treemap sector weights match executable display weights.
 - [ ] Scatter includes selected and excluded tickers.
 - [ ] Selected scatter marks are visually distinct from excluded marks.
 - [ ] Footer `run_id` matches the published run.

@@ -117,9 +117,16 @@ These are currently emitted as features for diagnostics and future forecast impr
 
 ## Forecast Methodology
 
-### Current MVP Forecast Is A Score
+### Forecast Score And Calibrated Return Modes
 
-The current field is named `expected_return` in the optimizer input, but scientifically it should be interpreted as a forecast score rather than a calibrated expected return.
+The heuristic baseline emits a cross-sectional score. The ML path can promote that score into a
+calibrated expected 5-trading-day return only when the calibration validation gate passes. Tableau
+and optimization outputs carry both semantics:
+
+- `forecast_score` is always the raw model or heuristic ranking signal.
+- `calibrated_expected_return` is populated only when score-to-return calibration passes.
+- `expected_return` equals `calibrated_expected_return` only when
+  `expected_return_is_calibrated = true`; otherwise it remains a score-scale optimizer input.
 
 For each eligible asset `i`, the MVP computes:
 
@@ -146,8 +153,14 @@ Interpretation:
 - Positive momentum increases the asset score.
 - High volatility reduces the asset score.
 - The score is cross-sectional and heuristic.
-- It is not yet probability-calibrated.
-- It is not yet a statistically validated return forecast.
+- It is not a percentage return unless `expected_return_is_calibrated = true`.
+
+The calibrated ML path fits the forecasting model in blocked out-of-sample folds, then fits an
+isotonic score-to-return calibrator on an earlier calibration split and validates it on a later
+calendar-date holdout. A run is promoted to calibrated only when it has enough total observations,
+enough validation observations, and passes the configured rank-IC/MAE/RMSE quality gates.
+Calibration folds use point-in-time liquidity filtering by date when `forecast.ml_max_assets` is set,
+so historical diagnostics are not selected by the latest-date liquidity universe.
 
 ### Eligibility Filter
 
@@ -456,6 +469,8 @@ Each row contains:
 - `volatility`
 - `current_weight`
 - `target_weight`
+- `executable_target_weight`
+- `executable_target_market_value`
 - `trade_weight`
 - `trade_abs_weight`
 - `estimated_commission_weight`
@@ -506,6 +521,8 @@ contribution_amount
 portfolio_value_after_contribution
 current_market_value
 target_market_value
+executable_target_weight
+executable_target_market_value
 trade_notional
 commission_amount
 deposit_used_amount
@@ -537,7 +554,10 @@ if abs(trade_weight_i) < execution.no_trade_band:
 ```
 
 This keeps the optimization problem convex while suppressing small trades in the recommendation
-layer.
+layer. `target_weight` remains the optimizer target. `executable_target_weight` is the allocation
+implied by the actual trade plan after no-trade-band and cash limits are applied. Suppressed rows are
+marked with `reason_code = suppressed_by_no_trade_band`; dashboards should use
+`executable_target_weight` or `display_target_weight` for executable allocation views.
 
 ## Contribution-Aware Backtesting
 
@@ -597,7 +617,9 @@ max_weight = max_i w_i
 concentration_hhi = sum_i w_i^2
 ```
 
-Important: `expected_return` is currently based on the heuristic forecast score `mu`, not a calibrated statistical expected return.
+Important: `expected_return` is a calibrated percentage return only when
+`expected_return_is_calibrated = true`. Otherwise, it is the score-scale optimizer input and should
+not be labeled as a predicted return.
 
 ### `sector_exposure`
 
@@ -625,9 +647,9 @@ The current implementation assumes:
 
 ## Known Limitations
 
-- Calibrated expected returns are available only when the calibration gate passes. If calibration is
-  disabled or fails minimum-observation checks, `forecast_score` remains a ranking signal rather
-  than a predicted percentage return.
+- Calibrated expected returns are available only when the validation gate passes. If calibration is
+  disabled, lacks observations, or fails rank-IC/MAE/RMSE checks, `forecast_score` remains a ranking
+  signal rather than a predicted percentage return.
 - Missing returns are filled with zero in the covariance matrix, which can understate risk for sparse assets.
 - Transaction costs are modeled as a flat percentage commission, not market impact or spread cost.
 - Current portfolio input is weight-based; share-count order generation is not implemented.
@@ -641,8 +663,7 @@ The current implementation assumes:
 
 ## Recommended Next Methodology Improvements
 
-1. Add a stronger walk-forward validation gate for calibrated expected returns, including bucket
-   calibration plots and post-cost SPY comparison.
+1. Add bucket calibration plots and post-cost SPY comparison to the calibration report.
 2. Add walk-forward backtesting with out-of-sample evaluation.
 3. Add covariance shrinkage, such as Ledoit-Wolf, to improve stability.
 4. Add transaction costs and turnover constraints.

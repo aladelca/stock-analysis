@@ -69,6 +69,7 @@ def build_ml_optimizer_inputs_with_artifacts(
     if latest_features.empty:
         msg = "No latest feature rows are available for ML inference"
         raise ValueError(msg)
+    calibration_panel = panel.copy()
 
     top_tickers = _top_liquidity_tickers(latest_features, config.ml_max_assets)
     if top_tickers is not None:
@@ -97,7 +98,7 @@ def build_ml_optimizer_inputs_with_artifacts(
     optimizer_input = latest_features.copy()
     optimizer_input["forecast_score"] = forecast_score
     calibration = _calibration_result(
-        panel=panel,
+        panel=calibration_panel,
         labels=labels,
         latest_features=optimizer_input,
         model_factory=model_factory,
@@ -225,10 +226,16 @@ def _calibration_result(
         score_scale=config.ml_score_scale,
         method=config.ml_calibration_method,
         min_observations=config.ml_calibration_min_observations,
+        min_validation_observations=config.ml_calibration_min_validation_observations,
+        validation_fraction=config.ml_calibration_validation_fraction,
+        min_rank_ic=config.ml_calibration_min_rank_ic,
+        max_mae=config.ml_calibration_max_mae,
+        max_rmse=config.ml_calibration_max_rmse,
         splits=config.ml_calibration_splits,
         embargo_days=max(config.ml_calibration_embargo_days, horizon_days),
         shrinkage=config.ml_calibration_shrinkage,
         lookback_days=config.ml_calibration_lookback_days,
+        max_assets_per_date=config.ml_max_assets,
     )
 
 

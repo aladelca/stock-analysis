@@ -140,8 +140,10 @@ The workbook should use these fields from `portfolio_dashboard_mart`:
 | `forecast_score` | y-axis and holdings signal field |
 | `volatility` | x-axis and risk field |
 | `current_weight` | prior portfolio allocation |
-| `target_weight` | allocation, treemap size, weight sanity check |
-| `target_weight_label` | formatted display |
+| `target_weight` | optimizer target allocation |
+| `executable_target_weight` | post-band target implied by executable trades |
+| `display_target_weight` | dust-cleaned executable allocation for charts |
+| `executable_target_weight_label` | formatted executable display |
 | `trade_weight` | signed buy/sell percentage |
 | `trade_abs_weight` | trade ticket bar size |
 | `estimated_commission_weight` | trade cost tooltip/KPI |
@@ -204,17 +206,20 @@ If you prefer to build manually instead of using the generator, create sheets:
 | `kpi_forecast_score` | Text | `MAX([portfolio_expected_return])` |
 | `kpi_volatility` | Text | `MAX([portfolio_expected_volatility])` |
 | `kpi_return_per_vol` | Text | `MAX([portfolio_return_per_vol])` |
-| `kpi_weight_sum` | Text | `SUM([target_weight])` |
-| `holdings_table` | Table/bar | filter `[selected] = true`; sort by `target_weight` desc |
+| `kpi_weight_sum` | Text | `SUM([display_target_weight])` |
+| `holdings_table` | Table/bar | filter `[selected] = true`; sort by `display_target_weight` desc |
 | `trade_tickets` | Bar | filter `[rebalance_required] = true`; sort by `trade_abs_weight` desc |
-| `sector_treemap` | Square | group by `gics_sector`; size by `SUM([target_weight])` |
+| `sector_treemap` | Square | group by `gics_sector`; size by `SUM([display_target_weight])` |
 | `risk_return_scatter` | Circle | x `volatility`; y `forecast_score`; size `scatter_size`; color by `gics_sector`; detail `ticker` |
 | `freshness_footer` | Text | `run_id`, `run_data_as_of_date`, `run_requested_as_of_date`, `run_config_hash_short` |
 
 Important aggregation rule:
 
 - Use `MAX()` for repeated portfolio-level columns.
-- Use `SUM([target_weight])` for allocation checks and sector totals.
+- Use `SUM([display_target_weight])` for executable allocation checks and sector totals; it can be
+  below `1.0` when cash remains after no-trade-band or cash-limit rules.
+- Use `SUM([target_weight])` only when you intentionally want the raw optimizer target before the
+  no-trade band.
 
 ## Dashboard Layout
 
@@ -273,6 +278,9 @@ Refresh the workbook in Tableau Cloud. If `run_id` changes in the footer, the lo
   current holdings file.
 - `forecast_score` is a ranking signal. Use `calibrated_expected_return` as expected percentage
   return only when `expected_return_is_calibrated = true`.
+- `target_weight` is the optimizer target. Use `display_target_weight` or
+  `executable_target_weight` for dashboard holdings, because no-trade-band rows can have a
+  nonzero optimizer target and no executable buy.
 - No time-series dashboard yet because the mart is one run, one decision.
 - Sector exposure is shown, but benchmark-relative sector bands are not implemented.
 
@@ -283,7 +291,7 @@ Refresh the workbook in Tableau Cloud. If `run_id` changes in the footer, the lo
 - [ ] `generate-tableau-workbook` writes `tableau/workbooks/portfolio_recommendations.twb`.
 - [ ] Generated `.twb` opens in Tableau Desktop after signing in to Tableau Cloud.
 - [ ] KPI tiles render non-null values.
-- [ ] `SUM([target_weight])` reads approximately `1.00`.
+- [ ] `SUM([display_target_weight])` is nonnegative and does not exceed `1.00` except for rounding.
 - [ ] `MAX([portfolio_max_weight])` is at or below configured `optimizer.max_weight`.
 - [ ] Holdings table filters to `[selected] = true`.
 - [ ] Scatter shows both selected and excluded tickers.

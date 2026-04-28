@@ -344,6 +344,7 @@ def test_one_shot_pipeline_can_use_ml_forecast_engine(sample_html, tmp_path: Pat
         "train_cutoff_date",
         "calibration_fold_start_date",
         "calibrated_expected_return",
+        "calibration_sample",
     ]
 
 
@@ -574,6 +575,9 @@ def _ml_portfolio_config(
             ml_lightgbm_nested_cv=False,
             ml_calibration_enabled=calibration_enabled,
             ml_calibration_min_observations=20,
+            ml_calibration_min_validation_observations=10,
+            ml_calibration_validation_fraction=0.25,
+            ml_calibration_min_rank_ic=-1.0,
             ml_calibration_splits=3,
             ml_calibration_embargo_days=5,
             ml_calibration_shrinkage=0.0,

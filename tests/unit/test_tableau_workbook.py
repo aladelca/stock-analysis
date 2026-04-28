@@ -121,9 +121,11 @@ def test_portfolio_workbook_uses_expected_fields_and_calculation(tmp_path: Path)
     assert datasource is not None
     field_names = {node.attrib["name"] for node in datasource.findall("./column")}
     assert "[target_weight]" in field_names
+    assert "[executable_target_weight]" in field_names
     assert "[forecast_score]" in field_names
     assert "[calibrated_expected_return]" in field_names
     assert "[display_target_weight]" in field_names
+    assert "[executable_target_market_value]" in field_names
     assert "[account_initial_value]" in field_names
     assert "[portfolio_footer_label]" in field_names
     assert "[holding_ticker]" in field_names
@@ -143,6 +145,14 @@ def test_portfolio_workbook_uses_expected_fields_and_calculation(tmp_path: Path)
     assert holding_calc is not None
     assert "[selected]" in holding_calc.attrib["formula"]
     assert "[display_target_weight]" in holding_calc.attrib["formula"]
+
+    holding_label_calc = datasource.find("./column[@name='[holding_weight_label]']/calculation")
+    assert holding_label_calc is not None
+    assert "[executable_target_weight_label]" in holding_label_calc.attrib["formula"]
+
+    kpi_weight_sum = root.find(".//worksheet[@name='KPI Weight Sum']")
+    assert kpi_weight_sum is not None
+    assert kpi_weight_sum.find(".//column[@name='[display_target_weight]']") is not None
 
     trade_calc = datasource.find("./column[@name='[trade_ticker]']/calculation")
     assert trade_calc is not None

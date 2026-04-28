@@ -96,6 +96,8 @@ class RecommendationLineRecord:
     gics_sector: str | None = None
     current_weight: float | None = None
     target_weight: float | None = None
+    executable_target_weight: float | None = None
+    executable_target_market_value: float | None = None
     trade_weight: float | None = None
     trade_notional: float | None = None
     commission_amount: float | None = None

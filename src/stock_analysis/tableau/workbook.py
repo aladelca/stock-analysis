@@ -106,6 +106,13 @@ FIELDS: dict[str, TableauField] = {
     "target_weight": TableauField(
         "target_weight", "real", "measure", "quantitative", "Target Weight"
     ),
+    "executable_target_weight": TableauField(
+        "executable_target_weight",
+        "real",
+        "measure",
+        "quantitative",
+        "Executable Target Weight",
+    ),
     "display_target_weight": TableauField(
         "display_target_weight", "real", "measure", "quantitative", "Display Target Weight"
     ),
@@ -161,6 +168,13 @@ FIELDS: dict[str, TableauField] = {
     "target_market_value": TableauField(
         "target_market_value", "real", "measure", "quantitative", "Target Market Value"
     ),
+    "executable_target_market_value": TableauField(
+        "executable_target_market_value",
+        "real",
+        "measure",
+        "quantitative",
+        "Executable Target Market Value",
+    ),
     "trade_notional": TableauField(
         "trade_notional", "real", "measure", "quantitative", "Trade Notional"
     ),
@@ -190,6 +204,13 @@ FIELDS: dict[str, TableauField] = {
     ),
     "target_weight_label": TableauField(
         "target_weight_label", "string", "dimension", "nominal", "Target Weight Label"
+    ),
+    "executable_target_weight_label": TableauField(
+        "executable_target_weight_label",
+        "string",
+        "dimension",
+        "nominal",
+        "Executable Target Weight Label",
     ),
     "trade_weight_label": TableauField(
         "trade_weight_label", "string", "dimension", "nominal", "Trade Weight Label"
@@ -372,7 +393,7 @@ FIELDS: dict[str, TableauField] = {
         "dimension",
         "nominal",
         "Holding Weight Label",
-        "IF [selected] THEN [target_weight_label] END",
+        "IF [selected] THEN [executable_target_weight_label] END",
     ),
     "trade_ticker": TableauField(
         "trade_ticker",
@@ -430,7 +451,7 @@ WORKSHEETS: tuple[WorksheetSpec, ...] = (
     WorksheetSpec(
         name="KPI Weight Sum",
         mark_class="Text",
-        encodings=(("text", ShelfField("target_weight", "Sum")),),
+        encodings=(("text", ShelfField("display_target_weight", "Sum")),),
     ),
     WorksheetSpec(
         name="Holdings by Weight",
@@ -459,7 +480,7 @@ WORKSHEETS: tuple[WorksheetSpec, ...] = (
         mark_class="Square",
         encodings=(
             ("color", ShelfField("gics_sector")),
-            ("size", ShelfField("target_weight", "Sum")),
+            ("size", ShelfField("display_target_weight", "Sum")),
             ("text", ShelfField("gics_sector")),
             ("tooltip", ShelfField("sector_target_weight", "Max")),
         ),

@@ -85,7 +85,7 @@ uv run --extra supabase stock-analysis register-cashflow \
   --type deposit
 ```
 
-For account performance versus SPY, cashflows entered on weekends or market holidays are applied to the next available SPY trading date in the benchmark simulation. The original cashflow date remains unchanged in Supabase and in the cashflow mart. Same-day cashflows are applied to live recommendations when `included_in_snapshot_id` is empty; set `included_in_snapshot_id` when the cashflow is already included in the imported snapshot.
+For account performance versus SPY, cashflows entered on weekends or market holidays are applied to the next available SPY trading date in the benchmark simulation. The original cashflow date remains unchanged in Supabase and in the cashflow mart. Live recommendations apply only settled cashflows strictly after the latest snapshot date. Same-day deposits are assumed to be represented by that same-day snapshot unless you import a later snapshot or run against an older snapshot date. Set `included_in_snapshot_id` when a cashflow is explicitly represented in an imported snapshot.
 
 Withdrawals, fees, and taxes are stored as negative cashflows even if you pass a positive amount:
 
@@ -150,7 +150,7 @@ uv run --extra supabase stock-analysis show-latest-portfolio-snapshot \
 
 ## Run Live Recommendations
 
-When `live_account.cashflow_source: actual` is set, `run-one-shot` loads the latest portfolio snapshot on or before the market data date, applies settled cashflows on or after that snapshot date unless they are marked as included in the snapshot, and uses that amount as the rebalance contribution. The monthly deposit assumption remains for backtesting and scenario mode.
+When `live_account.cashflow_source: actual` is set, `run-one-shot` loads the latest portfolio snapshot on or before the market data date, applies settled cashflows strictly after that snapshot date unless they are marked as included in a later snapshot, and uses that amount as the rebalance contribution. The monthly deposit assumption remains for backtesting and scenario mode.
 
 By default, SPY remains the benchmark and is also added as an optimizer candidate when price history is available. It uses the separate `optimizer.benchmark_candidate_max_weight` cap, while `optimizer.preserve_outside_holdings` applies to positions that are still outside the optimizer universe.
 
@@ -167,6 +167,8 @@ Recommended cadence:
 - Register deposits as they happen.
 - Import a fresh holdings snapshot after market close when you want measured return tracking.
 - Run recommendations after the fresh snapshot and after any deposit you want considered in the next rebalance.
+- If you register a deposit on the same date as the latest snapshot, import a new snapshot after the
+  deposit settles or run with a previous snapshot date if that deposit is not already included.
 - After you execute recommended buys or sells, import a new holdings snapshot before rerunning
   recommendations. The live flow does not infer executed trades from prior recommendation output.
 
@@ -199,11 +201,18 @@ Recommendation runs include calibration metadata:
 - `calibration_rmse`
 - `calibration_rank_ic`
 
+The `forecast_calibration_diagnostics` artifact adds holdout-specific fields such as
+`calibration_fit_observations`, `calibration_total_observations`, and
+`calibration_validation_fraction`.
+
 Recommendation lines now include forecast outcome fields:
 
 - `forecast_score`
 - `expected_return_is_calibrated`
 - `calibrated_expected_return`
+- `target_weight`
+- `executable_target_weight`
+- `executable_target_market_value`
 - `forecast_horizon_days`
 - `forecast_start_date`
 - `forecast_end_date`
@@ -241,7 +250,7 @@ across refreshes.
 
 ## Operational Notes
 
-Supabase is the source for accounts, cashflows, portfolio snapshots, and holdings, and it stores live recommendation and performance history after each successful live run.
+Supabase is the source for accounts, cashflows, portfolio snapshots, and holdings, and it stores live recommendation and performance history after each successful live run. When a completed recommendation run is persisted for the same account and market data date, older completed runs for that date are marked `superseded` so Tableau can filter to the canonical `completed` run.
 
 The generated Hyper extract contains `portfolio_dashboard_mart`, calibration diagnostics tables,
 and account tracking tables when they exist for the run. CSV and Parquet mirrors remain available

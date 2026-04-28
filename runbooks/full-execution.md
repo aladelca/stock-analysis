@@ -263,6 +263,7 @@ data/runs/$RUN_ID/gold/csv/portfolio_recommendations.csv
 Live Supabase-backed runs also produce account-tracking outputs. `recommendation_lines`
 and `portfolio_dashboard_mart` include forecast horizon outcome columns such as
 `forecast_score`, `expected_return_is_calibrated`, `calibrated_expected_return`,
+`target_weight`, `executable_target_weight`, `executable_target_market_value`,
 `forecast_horizon_days`, `forecast_start_date`, `forecast_end_date`, `realized_return`,
 `realized_spy_return`, `realized_active_return`, `forecast_error`, `forecast_hit`, and
 `outcome_status`. `forecast_error` is populated only for calibrated return forecasts. When
@@ -303,6 +304,7 @@ print(meta[["requested_as_of_date", "data_as_of_date", "as_of_date", "run_id", "
 print("latest feature date:", features["latest_date"].max())
 print("recommendation as_of_date:", recs["as_of_date"].unique())
 print("weight sum:", recs["target_weight"].sum())
+print("executable weight sum:", recs["executable_target_weight"].sum())
 print("current weight sum:", recs["current_weight"].sum())
 print("trade abs weight:", recs.loc[recs["rebalance_required"], "trade_abs_weight"].sum())
 print("estimated commission:", recs["estimated_commission_weight"].sum())
@@ -320,6 +322,8 @@ Expected:
 - `forecast_engine` is `ml`.
 - `model_version` is `lightgbm_return_zscore`.
 - `target_weight` sums approximately to `1.0`.
+- `executable_target_weight` can be below `1.0` when no-trade-band or cash-limit rules leave
+  residual cash.
 - `estimated_commission_weight` equals `0.02 * trade_abs_weight` for planned BUY/SELL rows.
 - `commission_amount` equals `0.02 * abs(trade_notional)` for planned BUY/SELL rows.
 - `max weight` is at or below the configured max weight, allowing tiny solver tolerance.
@@ -332,7 +336,7 @@ Top recommendations:
 uv run python -c 'import os, pandas as pd
 run = os.environ["RUN_ID"]
 recs = pd.read_parquet(f"data/runs/{run}/gold/portfolio_recommendations.parquet")
-cols = ["ticker", "security", "gics_sector", "current_weight", "target_weight", "trade_weight", "trade_notional", "commission_amount", "action", "reason_code"]
+cols = ["ticker", "security", "gics_sector", "current_weight", "target_weight", "executable_target_weight", "trade_weight", "trade_notional", "commission_amount", "action", "reason_code"]
 print(recs[cols].head(25).to_string(index=False))
 '
 ```
@@ -404,6 +408,11 @@ forecast:
   ml_score_scale: 1.0
   ml_calibration_enabled: true
   ml_calibration_min_observations: 200
+  ml_calibration_min_validation_observations: 200
+  ml_calibration_validation_fraction: 0.2
+  ml_calibration_min_rank_ic: 0.02
+  ml_calibration_max_mae: null
+  ml_calibration_max_rmse: null
   ml_calibration_splits: 5
   ml_calibration_embargo_days: 15
   ml_calibration_shrinkage: 0.25
@@ -472,6 +481,7 @@ tableau_prep_outputs/portfolio_dashboard_mart.hyper
 Validation inside Tableau Prep:
 
 - `target_weight` sums to approximately `1.0`.
+- `display_target_weight`/`executable_target_weight` represent the post-band executable allocation.
 - No selected asset has a negative weight.
 - Selected assets do not exceed configured max weight.
 - `run_id` is consistent across recommendations, risk metrics, sector exposure, and metadata.

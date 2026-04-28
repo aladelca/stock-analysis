@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 import pandas as pd
@@ -43,6 +44,7 @@ def test_account_tracking_marts_include_cashflows_performance_and_recommendation
     assert tables["recommendation_lines"]["forecast_score"].iat[0] == pytest.approx(0.2)
     assert tables["recommendation_lines"]["forecast_horizon_days"].iat[0] == 5
     assert tables["recommendation_lines"]["outcome_status"].iat[0] == "pending"
+    assert tables["recommendation_lines"]["executable_target_weight"].iat[0] == pytest.approx(0.5)
 
     performance = tables["performance_snapshots"].set_index("as_of_date")
     assert performance.loc["2026-01-02", "initial_value"] == pytest.approx(1000.0)
@@ -66,6 +68,37 @@ def test_spy_same_cashflow_benchmark_maps_weekend_cashflows_to_next_trading_day(
 
     performance = tables["performance_snapshots"].set_index("as_of_date")
     assert performance.loc["2026-01-10", "spy_same_cashflow_value"] == pytest.approx(1133.3311)
+
+
+def test_performance_does_not_double_count_unmarked_same_day_cashflow() -> None:
+    base_state = _live_state()
+    live_state = replace(
+        base_state,
+        cashflows=[
+            base_state.cashflows[0],
+            CashflowRecord(
+                id="cashflow-same-day",
+                account_id="account-1",
+                cashflow_date=date(2026, 1, 10),
+                amount=250.0,
+                cashflow_type="deposit",
+            ),
+        ],
+        applied_cashflows=[],
+        contribution_amount=0.0,
+    )
+    tables = build_account_tracking_marts(
+        live_state=live_state,
+        recommendations=_recommendations(),
+        run_metadata=_run_metadata(),
+        spy_daily=_spy_daily(),
+        commission_rate=0.0,
+    )
+
+    performance = tables["performance_snapshots"].set_index("as_of_date")
+
+    assert performance.loc["2026-01-10", "total_deposits"] == pytest.approx(100.0)
+    assert performance.loc["2026-01-10", "net_external_cashflow"] == pytest.approx(100.0)
 
 
 def test_dashboard_mart_exposes_latest_account_performance_fields() -> None:
@@ -104,6 +137,7 @@ def test_dashboard_mart_ignores_solver_dust_for_selected_rows() -> None:
                         **_recommendations().iloc[0].to_dict(),
                         "ticker": "DUST",
                         "target_weight": 1e-10,
+                        "executable_target_weight": 1e-10,
                         "trade_weight": 1e-10,
                         "trade_abs_weight": 1e-10,
                         "rebalance_required": False,
@@ -211,6 +245,8 @@ def _recommendations() -> pd.DataFrame:
                 "volatility": 0.2,
                 "current_weight": 0.9,
                 "target_weight": 0.5,
+                "executable_target_weight": 0.5,
+                "executable_target_market_value": 655.0,
                 "trade_weight": -0.4,
                 "trade_abs_weight": 0.4,
                 "estimated_commission_weight": 0.0,

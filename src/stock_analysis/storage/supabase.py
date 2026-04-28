@@ -201,8 +201,24 @@ class SupabaseAccountTrackingRepository:
                 on_conflict="run_id",
             )
         )
-        return _recommendation_run_from_row(
+        inserted = _recommendation_run_from_row(
             _single_response_row(response, self._config.recommendation_runs_table)
+        )
+        if inserted.status == "completed":
+            self._supersede_prior_completed_recommendation_runs(inserted)
+        return inserted
+
+    def _supersede_prior_completed_recommendation_runs(
+        self,
+        run: RecommendationRunRecord,
+    ) -> None:
+        _execute(
+            self._table(self._config.recommendation_runs_table)
+            .update({"status": "superseded"})
+            .eq("account_id", run.account_id)
+            .eq("data_as_of_date", run.data_as_of_date.isoformat())
+            .eq("status", "completed")
+            .neq("run_id", run.run_id)
         )
 
     def insert_recommendation_lines(
@@ -422,6 +438,8 @@ def _recommendation_line_from_row(row: Mapping[str, Any]) -> RecommendationLineR
         gics_sector=_optional_str(row.get("gics_sector")),
         current_weight=_optional_float(row.get("current_weight")),
         target_weight=_optional_float(row.get("target_weight")),
+        executable_target_weight=_optional_float(row.get("executable_target_weight")),
+        executable_target_market_value=_optional_float(row.get("executable_target_market_value")),
         trade_weight=_optional_float(row.get("trade_weight")),
         trade_notional=_optional_float(row.get("trade_notional")),
         commission_amount=_optional_float(row.get("commission_amount")),

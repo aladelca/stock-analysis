@@ -83,6 +83,13 @@ def plan_rebalance_trades(
         available_cash=context.cash_before_rebalance,
         commission_rate=float(commission_rate),
     )
+    executable_target_market_value = (
+        current_weights.to_numpy(dtype=float) * context.portfolio_value_after_contribution
+        + trade_notional
+    )
+    executable_target_weight = executable_target_market_value / float(
+        context.portfolio_value_after_contribution
+    )
     commission_amount = np.abs(trade_notional) * float(commission_rate)
     required = np.where(trade_notional > 0, trade_notional + commission_amount, 0.0)
     released = np.where(trade_notional < 0, np.abs(trade_notional) - commission_amount, 0.0)
@@ -100,6 +107,8 @@ def plan_rebalance_trades(
             * context.portfolio_value_after_contribution,
             "target_market_value": target_weights.to_numpy(dtype=float)
             * context.portfolio_value_after_contribution,
+            "executable_target_weight": executable_target_weight,
+            "executable_target_market_value": executable_target_market_value,
             "trade_notional": trade_notional,
             "commission_amount": commission_amount,
             "deposit_used_amount": deposit_used,

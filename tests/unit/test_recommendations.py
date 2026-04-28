@@ -130,6 +130,10 @@ def test_recommendations_include_contribution_dollar_fields() -> None:
     assert by_ticker.loc["BBB", "trade_notional"] == pytest.approx(245.0980392157)
     assert by_ticker.loc["BBB", "commission_amount"] == pytest.approx(4.9019607843)
     assert by_ticker.loc["BBB", "portfolio_value_after_contribution"] == pytest.approx(1100)
+    assert by_ticker.loc["BBB", "executable_target_weight"] == pytest.approx(
+        (300.0 + 245.0980392157) / 1100.0
+    )
+    assert by_ticker.loc["BBB", "executable_target_market_value"] == pytest.approx(545.0980392157)
     assert by_ticker.loc["BBB", "deposit_used_amount"] > 0
     assert by_ticker["cash_after_trade_amount"].iloc[0] >= -1e-9
 
@@ -243,3 +247,8 @@ def test_no_trade_band_converts_small_trades_to_hold() -> None:
 
     assert set(recommendations["action"]) == {"HOLD"}
     assert recommendations["no_trade_band_applied"].all()
+    by_ticker = recommendations.set_index("ticker")
+    assert by_ticker.loc["AAA", "reason_code"] == "suppressed_by_no_trade_band"
+    assert by_ticker.loc["BBB", "reason_code"] == "suppressed_by_no_trade_band"
+    assert by_ticker.loc["AAA", "executable_target_weight"] == pytest.approx(0.5)
+    assert by_ticker.loc["BBB", "executable_target_weight"] == pytest.approx(0.5)

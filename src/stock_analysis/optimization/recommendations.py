@@ -136,6 +136,8 @@ def build_recommendations(
         "portfolio_value_after_contribution",
         "current_market_value",
         "target_market_value",
+        "executable_target_weight",
+        "executable_target_market_value",
         "trade_notional",
         "commission_amount",
         "deposit_used_amount",
@@ -309,6 +311,8 @@ def _attach_rebalance_plan(
         "portfolio_value_after_contribution",
         "current_market_value",
         "target_market_value",
+        "executable_target_weight",
+        "executable_target_market_value",
         "trade_notional",
         "commission_amount",
         "deposit_used_amount",
@@ -328,6 +332,8 @@ def _attach_empty_rebalance_plan(result: pd.DataFrame) -> pd.DataFrame:
         "portfolio_value_after_contribution": pd.NA,
         "current_market_value": pd.NA,
         "target_market_value": pd.NA,
+        "executable_target_weight": pd.NA,
+        "executable_target_market_value": pd.NA,
         "trade_notional": pd.NA,
         "commission_amount": pd.NA,
         "deposit_used_amount": 0.0,
@@ -338,6 +344,26 @@ def _attach_empty_rebalance_plan(result: pd.DataFrame) -> pd.DataFrame:
     for column, default in defaults.items():
         if column not in enriched.columns:
             enriched[column] = pd.Series(default, index=enriched.index)
+    suppressed = enriched["no_trade_band_applied"].fillna(False).astype(bool)
+    executable_weight = pd.to_numeric(
+        enriched["executable_target_weight"],
+        errors="coerce",
+    )
+    fallback_weight = (
+        pd.to_numeric(
+            enriched["target_weight"],
+            errors="coerce",
+        )
+        .fillna(0.0)
+        .where(
+            ~suppressed,
+            pd.to_numeric(enriched["current_weight"], errors="coerce").fillna(0.0),
+        )
+    )
+    enriched["executable_target_weight"] = executable_weight.where(
+        executable_weight.notna(),
+        fallback_weight,
+    )
     return enriched
 
 
@@ -345,6 +371,12 @@ def _reason_codes(result: pd.DataFrame) -> pd.Series:
     reason = pd.Series("not_selected_or_below_threshold", index=result.index, dtype="object")
     reason.loc[result["action"].isin(["BUY", "SELL"])] = "rebalance_to_target"
     reason.loc[result["action"].eq("HOLD")] = "within_rebalance_threshold"
+    no_trade_band_applied = result.get(
+        "no_trade_band_applied",
+        pd.Series(False, index=result.index),
+    )
+    no_trade_band_applied = no_trade_band_applied.fillna(False).astype(bool)
+    reason.loc[no_trade_band_applied] = "suppressed_by_no_trade_band"
 
     eligible = result.get("eligible_for_optimization", pd.Series(False, index=result.index))
     eligible = eligible.fillna(False).astype(bool)

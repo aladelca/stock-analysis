@@ -228,8 +228,8 @@ def _performance_snapshots_table(
         if index > 0:
             period_cashflow = _net_cashflow_between(
                 live_state.cashflows,
-                previous_snapshot.snapshot_date,
-                snapshot.snapshot_date,
+                previous_snapshot,
+                snapshot,
             )
             if previous_snapshot.total_value > 0:
                 twr_returns.append(
@@ -240,7 +240,11 @@ def _performance_snapshots_table(
         cashflows_to_date = [
             cashflow
             for cashflow in live_state.cashflows
-            if first_snapshot.snapshot_date < cashflow.cashflow_date <= snapshot.snapshot_date
+            if _cashflow_applies_to_snapshot(
+                cashflow,
+                first_snapshot_date=first_snapshot.snapshot_date,
+                snapshot=snapshot,
+            )
         ]
         total_deposits = _total_deposits(cashflows_to_date)
         invested_capital = float(first_snapshot.total_value) + total_deposits
@@ -345,16 +349,37 @@ def _same_cashflow_spy_benchmark(
 
 def _net_cashflow_between(
     cashflows: list[CashflowRecord],
-    start_date: date,
-    end_date: date,
+    start_snapshot: PortfolioSnapshotRecord,
+    end_snapshot: PortfolioSnapshotRecord,
 ) -> float:
     return float(
         sum(
             cashflow.amount
             for cashflow in cashflows
-            if start_date < cashflow.cashflow_date <= end_date
+            if _cashflow_applies_between_snapshots(cashflow, start_snapshot, end_snapshot)
         )
     )
+
+
+def _cashflow_applies_between_snapshots(
+    cashflow: CashflowRecord,
+    start_snapshot: PortfolioSnapshotRecord,
+    end_snapshot: PortfolioSnapshotRecord,
+) -> bool:
+    if cashflow.included_in_snapshot_id == end_snapshot.id:
+        return True
+    return start_snapshot.snapshot_date < cashflow.cashflow_date < end_snapshot.snapshot_date
+
+
+def _cashflow_applies_to_snapshot(
+    cashflow: CashflowRecord,
+    *,
+    first_snapshot_date: date,
+    snapshot: PortfolioSnapshotRecord,
+) -> bool:
+    if cashflow.included_in_snapshot_id == snapshot.id:
+        return True
+    return first_snapshot_date < cashflow.cashflow_date < snapshot.snapshot_date
 
 
 def _cashflow_amount_by_trading_date(
@@ -516,6 +541,8 @@ def _recommendation_line_columns() -> list[str]:
         "outcome_status",
         "current_weight",
         "target_weight",
+        "executable_target_weight",
+        "executable_target_market_value",
         "trade_weight",
         "trade_abs_weight",
         "trade_notional",

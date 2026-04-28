@@ -48,6 +48,11 @@ forecast:
   ml_calibration_method: isotonic
   ml_calibration_target: return
   ml_calibration_min_observations: 200
+  ml_calibration_min_validation_observations: 200
+  ml_calibration_validation_fraction: 0.2
+  ml_calibration_min_rank_ic: 0.02
+  ml_calibration_max_mae: null
+  ml_calibration_max_rmse: null
   ml_calibration_lookback_days: null
   ml_calibration_splits: 5
   ml_calibration_embargo_days: 15

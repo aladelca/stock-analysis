@@ -189,6 +189,8 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
                 recommendation_run_id=run.id or "",
                 ticker="SPY",
                 target_weight=0.3,
+                executable_target_weight=0.25,
+                executable_target_market_value=250.0,
                 action="BUY",
                 forecast_score=0.2,
                 expected_return=0.2,
@@ -222,6 +224,8 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
     assert run.calibration_mae == pytest.approx(0.015)
     assert client.tables["recommendation_runs"][0]["calibration_method"] == "isotonic"
     assert lines[0].id == "recommendation_lines-1"
+    assert lines[0].executable_target_weight == pytest.approx(0.25)
+    assert lines[0].executable_target_market_value == pytest.approx(250.0)
     assert lines[0].forecast_score == pytest.approx(0.2)
     assert lines[0].forecast_horizon_days == 5
     assert lines[0].forecast_start_date == date(2026, 4, 24)
@@ -232,6 +236,40 @@ def test_repository_writes_recommendations_and_performance_snapshot() -> None:
     assert performance.invested_capital == pytest.approx(1000.0)
     assert client.tables["performance_snapshots"][0]["as_of_date"] == "2026-04-24"
     assert repo.list_performance_snapshots("account-1") == [performance]
+
+
+def test_repository_supersedes_prior_completed_recommendation_runs_for_same_date() -> None:
+    client = FakeSupabaseClient()
+    repo = SupabaseAccountTrackingRepository(client, SupabaseConfig())
+    first = repo.insert_recommendation_run(
+        RecommendationRunRecord(
+            account_id="account-1",
+            run_id="run-1",
+            as_of_date=date(2026, 4, 24),
+            data_as_of_date=date(2026, 4, 24),
+            model_version="model",
+            ml_score_scale=1.0,
+            config_hash="abc123",
+        )
+    )
+    second = repo.insert_recommendation_run(
+        RecommendationRunRecord(
+            account_id="account-1",
+            run_id="run-2",
+            as_of_date=date(2026, 4, 24),
+            data_as_of_date=date(2026, 4, 24),
+            model_version="model",
+            ml_score_scale=1.0,
+            config_hash="def456",
+        )
+    )
+
+    runs = repo.list_recommendation_runs("account-1")
+
+    assert first.id == "recommendation_runs-1"
+    assert second.id == "recommendation_runs-2"
+    assert [run.run_id for run in runs] == ["run-1", "run-2"]
+    assert [run.status for run in runs] == ["superseded", "completed"]
 
 
 def test_repository_paginates_recommendation_lines(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -310,12 +348,21 @@ class FakeQuery:
         self.on_conflict = on_conflict
         return self
 
+    def update(self, payload: dict[str, Any]) -> FakeQuery:
+        self.action = "update"
+        self.payload = payload
+        return self
+
     def delete(self) -> FakeQuery:
         self.action = "delete"
         return self
 
     def eq(self, column: str, value: Any) -> FakeQuery:
         self.filters.append(("eq", column, value))
+        return self
+
+    def neq(self, column: str, value: Any) -> FakeQuery:
+        self.filters.append(("neq", column, value))
         return self
 
     def gte(self, column: str, value: Any) -> FakeQuery:
@@ -347,6 +394,8 @@ class FakeQuery:
             return FakeResponse(self._insert_rows())
         if self.action == "upsert":
             return FakeResponse(self._upsert_rows())
+        if self.action == "update":
+            return FakeResponse(self._update_rows())
         if self.action == "delete":
             return FakeResponse(self._delete_rows())
         return FakeResponse(self._select_rows())
@@ -389,11 +438,25 @@ class FakeQuery:
         self.client.tables[self.table_name] = [row for row in self._table() if row not in rows]
         return rows
 
+    def _update_rows(self) -> list[dict[str, Any]]:
+        if self.payload is None or isinstance(self.payload, list):
+            raise AssertionError("update payload is required")
+        selected = self._select_rows()
+        updated: list[dict[str, Any]] = []
+        for index, row in enumerate(self._table()):
+            if row in selected:
+                stored = {**row, **self.payload}
+                self._table()[index] = stored
+                updated.append(stored)
+        return updated
+
     def _select_rows(self) -> list[dict[str, Any]]:
         rows = list(self._table())
         for operator, column, value in self.filters:
             if operator == "eq":
                 rows = [row for row in rows if row.get(column) == value]
+            elif operator == "neq":
+                rows = [row for row in rows if row.get(column) != value]
             elif operator == "gte":
                 rows = [row for row in rows if row.get(column) >= value]
             elif operator == "lte":
@@ -401,7 +464,7 @@ class FakeQuery:
             elif operator == "in":
                 rows = [row for row in rows if row.get(column) in set(value)]
         for column, desc in reversed(self.orders):
-            rows = sorted(rows, key=lambda row: row.get(column), reverse=desc)
+            rows = sorted(rows, key=lambda row: str(row.get(column) or ""), reverse=desc)
         if self.row_limit is not None:
             rows = rows[: self.row_limit]
         if self.row_range is not None:

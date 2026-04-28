@@ -72,6 +72,8 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "portfolio_value_after_contribution",
         "current_market_value",
         "target_market_value",
+        "executable_target_weight",
+        "executable_target_market_value",
         "trade_notional",
         "commission_amount",
         "deposit_used_amount",

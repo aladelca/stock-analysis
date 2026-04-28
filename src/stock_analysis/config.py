@@ -86,6 +86,11 @@ class ForecastConfig(BaseModel):
     ml_calibration_method: Literal["isotonic"] = "isotonic"
     ml_calibration_target: Literal["return"] = "return"
     ml_calibration_min_observations: int = Field(default=200, ge=10)
+    ml_calibration_min_validation_observations: int = Field(default=200, ge=10)
+    ml_calibration_validation_fraction: float = Field(default=0.2, gt=0, lt=1)
+    ml_calibration_min_rank_ic: float = Field(default=0.02, ge=-1, le=1)
+    ml_calibration_max_mae: float | None = Field(default=None, gt=0)
+    ml_calibration_max_rmse: float | None = Field(default=None, gt=0)
     ml_calibration_lookback_days: int | None = Field(default=None, ge=30)
     ml_calibration_splits: int = Field(default=5, ge=2)
     ml_calibration_embargo_days: int = Field(default=15, ge=0)

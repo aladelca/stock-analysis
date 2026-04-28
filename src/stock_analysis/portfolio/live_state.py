@@ -112,7 +112,7 @@ def _unapplied_cashflows_after_snapshot(
         cashflow
         for cashflow in cashflows
         if cashflow.included_in_snapshot_id is None and _is_settled(cashflow, as_of_date)
-        if cashflow.cashflow_date >= start_date and cashflow.cashflow_date <= as_of_date
+        if cashflow.cashflow_date > start_date and cashflow.cashflow_date <= as_of_date
     ]
 
 
