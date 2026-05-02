@@ -40,6 +40,7 @@ See:
 - `runbooks/tableau-prep.md`
 - `runbooks/tableau-server-publish.md`
 - `tableau/prep/portfolio_dashboard_mart.flow-spec.md`
+- `docs/project-current-state.md`
 - `docs/forecasting-optimization-methodology.md`
 - `docs/tableau-dashboard-design.md`
 - `docs/tableau-dashboard-build-plan.md`
