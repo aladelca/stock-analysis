@@ -7,13 +7,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN python -m pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY configs ./configs
 
-RUN uv sync --frozen --extra gcp --extra supabase --extra mlflow --no-dev
+RUN uv sync --frozen --extra gcp --extra mlflow --no-dev
 
 ENV PATH="/app/.venv/bin:${PATH}"
 

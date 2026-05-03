@@ -20,8 +20,14 @@ Local pipeline
   -> local filesystem medallion artifacts under data/runs/<run_id>/
 
 Cloud pipeline
+  stock-analysis train-gcp-model
+  -> direct Cloud Storage medallion artifacts under gs://<bucket>/runs/<training_run_id>/
+  -> versioned model artifacts under gs://<bucket>/models/runs/<training_run_id>/
+  -> promoted model artifact under gs://<bucket>/models/production/
+
   stock-analysis run-gcp-one-shot
   -> direct Cloud Storage medallion artifacts under gs://<bucket>/runs/<run_id>/
+  -> loads the promoted or explicitly configured GCS model artifact
   -> BigQuery dashboard/history tables for Tableau
 ```
 
@@ -35,7 +41,9 @@ entrypoints and separate artifact-store implementations.
 - Do not introduce Cloud Composer or Dataflow in v1.
 - Do not require Tableau Hyper as the cloud serving layer.
 - Do not use a local staging directory as the cloud artifact source of truth.
-- Do not migrate Supabase to GCP in this phase.
+- Do not use Supabase in the GCP runtime.
+- Do not use Vertex AI for model training, registry, or inference in this phase.
+- Do not retrain inside the GCP inference/recommendation job.
 
 ## Target Architecture
 
@@ -49,16 +57,24 @@ flowchart LR
 
     subgraph GCP
         User[gcloud run jobs execute]
-        CloudRun[Cloud Run Job]
-        CloudCLI[stock-analysis run-gcp-one-shot]
+        TrainJob[Cloud Run Training Job]
+        InferJob[Cloud Run Inference Job]
+        TrainCLI[stock-analysis train-gcp-model]
+        InferCLI[stock-analysis run-gcp-one-shot]
         GCS[(Cloud Storage medallion lake)]
+        ModelRegistry[(GCS model registry)]
         BQ[(BigQuery gold marts)]
         Tableau[Tableau]
 
-        User --> CloudRun
-        CloudRun --> CloudCLI
-        CloudCLI --> GCS
-        CloudCLI --> BQ
+        User --> TrainJob
+        User --> InferJob
+        TrainJob --> TrainCLI
+        InferJob --> InferCLI
+        TrainCLI --> GCS
+        TrainCLI --> ModelRegistry
+        ModelRegistry --> InferCLI
+        InferCLI --> GCS
+        InferCLI --> BQ
         BQ --> Tableau
     end
 ```
@@ -83,6 +99,21 @@ LocalArtifactStore -> pathlib.Path files
 GcsArtifactStore   -> gs:// objects
 ```
 
+The GCP path also separates model lifecycle from recommendation execution:
+
+```text
+train-gcp-model
+  -> preprocesses data
+  -> trains and calibrates the configured ML forecast model
+  -> writes model.cloudpickle, metadata.json, and calibration artifacts to GCS
+  -> optionally promotes the model to gs://<bucket>/models/production/model.cloudpickle
+
+run-gcp-one-shot
+  -> preprocesses current data
+  -> loads the promoted or configured GCS model artifact
+  -> scores current candidates, optimizes, writes Tableau marts, and publishes BigQuery
+```
+
 ## Proposed Stack
 
 | Need | GCP Service / Library |
@@ -91,7 +122,6 @@ GcsArtifactStore   -> gs:// objects
 | Container registry | Artifact Registry |
 | Medallion artifact lake | Cloud Storage |
 | Tableau serving layer | BigQuery |
-| Secrets | Secret Manager |
 | Runtime identity | Cloud Run service account |
 | Logs | Cloud Logging |
 | Python GCS writes | `google-cloud-storage` |
@@ -182,9 +212,9 @@ Initial BigQuery tables:
 | `stock_analysis_gold.sector_exposure` | Idempotent append by `run_id` | Allocation views |
 | `stock_analysis_gold.run_metadata` | Idempotent append by `run_id` | Data freshness and model status |
 | `stock_analysis_gold.forecast_calibration_diagnostics` | Idempotent append by `run_id` | Calibration health |
-| `stock_analysis_gold.recommendation_runs_history` | Full refresh from Supabase history | Run history |
-| `stock_analysis_gold.recommendation_lines_history` | Full refresh from Supabase history | Forecast/outcome history |
-| `stock_analysis_gold.performance_snapshots_history` | Full refresh from Supabase history | Account vs SPY |
+| `stock_analysis_gold.recommendation_runs_history` | Full refresh from account history | Run history |
+| `stock_analysis_gold.recommendation_lines_history` | Full refresh from account history | Forecast/outcome history |
+| `stock_analysis_gold.performance_snapshots_history` | Full refresh from account history | Account vs SPY |
 | `stock_analysis_gold.tableau_dashboard_mart` | Idempotent append or current-view table | Main Tableau dashboard |
 
 Recommended idempotency:
@@ -195,7 +225,7 @@ Recommended idempotency:
 4. Drop staging.
 
 For v1, use delete-by-`run_id` plus append for run-scoped tables. Use full-refresh writes for
-Supabase-derived history tables so repeated on-demand runs do not duplicate older history rows.
+account history tables so repeated on-demand runs do not duplicate older history rows.
 
 Recommended partitioning and clustering:
 
@@ -236,6 +266,8 @@ gcp:
   region: us-central1
   bucket: stock-analysis-medallion-prod
   gcs_prefix: runs
+  model_registry_prefix: models
+  model_artifact_uri: null
   bigquery_location: US
   bigquery_dataset_gold: stock_analysis_gold
   bigquery_dataset_metadata: stock_analysis_metadata
@@ -251,7 +283,9 @@ configs/portfolio.gcp.yaml
 This file should inherit the same modeling and optimizer settings as `configs/portfolio.yaml`, but:
 
 - Enable the `gcp` section.
-- Enable Supabase only if the Cloud Run job has the necessary secrets.
+- Leave Supabase disabled in the cloud config.
+- Use BigQuery as the cloud persistence target for dashboard tables and, after the account
+  repository is implemented, cashflows/snapshots.
 - Keep local `run.output_root` irrelevant to the cloud command.
 
 Acceptance criteria:
@@ -438,11 +472,15 @@ Acceptance criteria:
 - Tables include `run_id` where applicable.
 - Idempotent rerun of the same `run_id` does not duplicate run-scoped rows.
 
-## Phase 6: Add CLI Command
+## Phase 6: Add CLI Commands
 
-Add a new command in `src/stock_analysis/cli.py`:
+Add two GCP commands in `src/stock_analysis/cli.py`:
 
 ```bash
+uv run --extra gcp stock-analysis train-gcp-model \
+  --config configs/portfolio.gcp.yaml \
+  --forecast-engine ml
+
 uv run --extra gcp stock-analysis run-gcp-one-shot \
   --config configs/portfolio.gcp.yaml \
   --forecast-engine ml
@@ -459,8 +497,14 @@ uv run stock-analysis run-one-shot \
 CLI output should include:
 
 ```text
+Completed GCP model training <run_id>
+GCS run root: gs://<bucket>/runs/<training_run_id>/
+Model artifact: gs://<bucket>/models/runs/<training_run_id>/model.cloudpickle
+Production model: gs://<bucket>/models/production/model.cloudpickle
+
 Completed GCP run <run_id>
 GCS run root: gs://<bucket>/runs/<run_id>/
+Model artifact: gs://<bucket>/models/production/model.cloudpickle
 BigQuery tables:
   stock_analysis_gold.portfolio_recommendations
   stock_analysis_gold.tableau_dashboard_mart
@@ -482,9 +526,13 @@ Dockerfile
 deployment/gcp/cloud-run-job.md
 ```
 
-Container command:
+Container commands:
 
 ```bash
+stock-analysis train-gcp-model \
+  --config configs/portfolio.gcp.yaml \
+  --forecast-engine ml
+
 stock-analysis run-gcp-one-shot \
   --config configs/portfolio.gcp.yaml \
   --forecast-engine ml
@@ -493,10 +541,11 @@ stock-analysis run-gcp-one-shot \
 The container should install the GCP extra:
 
 ```bash
-uv sync --extra gcp --extra supabase --extra mlflow
+uv sync --extra gcp --extra mlflow
 ```
 
-Supabase and MLflow extras can be included only if needed in the cloud job.
+The cloud image should not install the Supabase extra. MLflow can be included only if needed in the
+cloud job.
 
 Acceptance criteria:
 
@@ -512,9 +561,9 @@ Manual, on-demand v1 resources:
 Artifact Registry repository
 Cloud Storage bucket
 BigQuery datasets
-Cloud Run Job
+Cloud Run training job
+Cloud Run inference job
 Service account
-Secret Manager secrets
 ```
 
 Minimum service account roles:
@@ -523,7 +572,6 @@ Minimum service account roles:
 roles/storage.objectAdmin on the medallion bucket
 roles/bigquery.dataEditor on target datasets
 roles/bigquery.jobUser on the project
-roles/secretmanager.secretAccessor for required secrets
 roles/logging.logWriter
 ```
 
@@ -532,6 +580,10 @@ No Cloud Scheduler yet.
 Cloud Run Job execution:
 
 ```bash
+gcloud run jobs execute stock-analysis-train-model \
+  --region us-central1 \
+  --wait
+
 gcloud run jobs execute stock-analysis-one-shot \
   --region us-central1 \
   --wait
@@ -539,9 +591,9 @@ gcloud run jobs execute stock-analysis-one-shot \
 
 Acceptance criteria:
 
-- Job runs on demand.
-- Cloud Logging shows run id and GCS run root.
-- GCS contains raw, bronze, silver, and gold artifacts.
+- Training and inference jobs run on demand.
+- Cloud Logging shows run id, GCS run root, and model artifact URI when applicable.
+- GCS contains raw, bronze, silver, gold, and model artifacts.
 - BigQuery contains dashboard tables.
 
 ## Phase 9: Add Tests
@@ -587,13 +639,12 @@ Must include:
 3. Artifact Registry creation.
 4. Cloud Storage bucket creation.
 5. BigQuery dataset creation.
-6. Secret Manager setup.
-7. Service account and IAM roles.
-8. Docker build and push.
-9. Cloud Run Job creation.
-10. Manual job execution.
-11. Tableau connection to BigQuery.
-12. Troubleshooting.
+6. Service account and IAM roles.
+7. Docker build and push.
+8. Cloud Run Job creation.
+9. Manual job execution.
+10. Tableau connection to BigQuery.
+11. Troubleshooting.
 
 Include exact command templates:
 
@@ -602,7 +653,9 @@ gcloud config set project <project_id>
 gcloud artifacts repositories create stock-analysis --repository-format=docker --location=us-central1
 gcloud storage buckets create gs://<bucket> --location=us-central1
 bq --location=US mk --dataset <project_id>:stock_analysis_gold
+gcloud run jobs create stock-analysis-train-model ...
 gcloud run jobs create stock-analysis-one-shot ...
+gcloud run jobs execute stock-analysis-train-model --region us-central1 --wait
 gcloud run jobs execute stock-analysis-one-shot --region us-central1 --wait
 ```
 
@@ -613,27 +666,32 @@ gcloud run jobs execute stock-analysis-one-shot --region us-central1 --wait
 3. Add local artifact store and adapt local pipeline through the shared store without changing CLI
    behavior.
 4. Add GCS artifact store.
-5. Add cloud one-shot wrapper.
-6. Add BigQuery publisher.
-7. Add `run-gcp-one-shot` CLI command.
-8. Add tests around store, config, publisher, and CLI.
-9. Add Dockerfile and Cloud Run Job docs.
-10. Manually execute against a dev bucket/dataset.
+5. Add GCS model registry.
+6. Add cloud model training wrapper.
+7. Add cloud one-shot wrapper that loads a GCS model artifact instead of retraining.
+8. Add BigQuery publisher.
+9. Add `train-gcp-model` and `run-gcp-one-shot` CLI commands.
+10. Add tests around store, config, model registry, publisher, and CLI.
+11. Add Dockerfile and Cloud Run Job docs.
+12. Manually execute training and inference against a dev bucket/dataset.
 
 ## Acceptance Criteria
 
 The feature is complete when:
 
 1. `run-one-shot` still writes local artifacts under `data/runs/<run_id>/`.
-2. `run-gcp-one-shot` writes raw, bronze, silver, and gold artifacts directly to GCS.
-3. `run-gcp-one-shot` does not create a completed local medallion run folder.
-4. GCS run layout mirrors the local medallion layout.
-5. BigQuery receives Tableau-ready gold/history tables.
-6. Tableau can connect to BigQuery for the dashboard.
-7. Cloud Run Job can be executed on demand.
-8. GCP credentials are handled through service account and Secret Manager, not committed files.
-9. Tests prove local behavior remains intact.
-10. Runbook provides exact deployment and execution commands.
+2. `train-gcp-model` writes raw, bronze, silver, gold, and model artifacts directly to GCS.
+3. `run-gcp-one-shot` writes raw, bronze, silver, and gold artifacts directly to GCS.
+4. `run-gcp-one-shot` loads the promoted or explicitly configured GCS model artifact and does not
+   retrain.
+5. `run-gcp-one-shot` fails clearly when no GCS model artifact exists.
+6. GCS run layout mirrors the local medallion layout.
+7. BigQuery receives Tableau-ready gold/history tables.
+8. Tableau can connect to BigQuery for the dashboard.
+9. Cloud Run Jobs can be executed on demand.
+10. GCP credentials are handled through the Cloud Run service account, not committed files.
+11. Tests prove local behavior remains intact.
+12. Runbook provides exact deployment and execution commands.
 
 ## Key Risks
 
@@ -646,6 +704,8 @@ The feature is complete when:
 | Cloud run fails after partial writes | Keep run-scoped immutable GCS paths and BigQuery idempotency by `run_id` |
 | Same run id is retried | Overwrite same GCS object names and replace/merge same BigQuery `run_id` rows |
 | Large DataFrames exceed memory | Revisit chunked Parquet writes or BigQuery load from GCS after v1 |
+| Inference accidentally retrains | Require an existing GCS model artifact in the GCP inference wrapper |
+| Model/config mismatch | Validate the loaded artifact model version against the inference config |
 
 ## Open Design Choices
 
@@ -662,7 +722,7 @@ These should be resolved during implementation:
 
 Recommended v1 choices:
 
-- Use `gcsfs` for direct GCS Parquet/CSV writes.
+- Use the Google Cloud Storage client with in-memory buffers for direct GCS Parquet/CSV writes.
 - Keep CSV mirrors in GCS to preserve medallion parity.
 - Publish BigQuery from in-memory DataFrames.
 - Use idempotent append/replace by `run_id` for run-scoped tables.
@@ -677,15 +737,24 @@ uv run stock-analysis run-one-shot \
   --config configs/portfolio.yaml \
   --forecast-engine ml
 
-# Cloud, direct GCS artifacts
+# Cloud training, direct GCS artifacts and model registry
+uv run --extra gcp stock-analysis train-gcp-model \
+  --config configs/portfolio.gcp.yaml \
+  --forecast-engine ml
+
+# Cloud inference, direct GCS artifacts
 uv run --extra gcp stock-analysis run-gcp-one-shot \
   --config configs/portfolio.gcp.yaml \
   --forecast-engine ml
 ```
 
-And one on-demand Cloud Run command:
+And two on-demand Cloud Run commands:
 
 ```bash
+gcloud run jobs execute stock-analysis-train-model \
+  --region us-central1 \
+  --wait
+
 gcloud run jobs execute stock-analysis-one-shot \
   --region us-central1 \
   --wait

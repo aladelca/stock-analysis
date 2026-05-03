@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from datetime import UTC, datetime
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -32,6 +33,55 @@ class MLOptimizerInputResult:
     calibration_diagnostics: pd.DataFrame
 
 
+@dataclass(frozen=True)
+class MLForecastModelArtifact:
+    model: Any
+    model_version: str
+    feature_columns: tuple[str, ...]
+    target_column: str
+    horizon_days: int
+    score_scale: float
+    trained_through_date: str
+    expected_return_is_calibrated: bool
+    calibration_status: str
+    calibration_method: str
+    calibration_target: str
+    calibration_shrinkage: float
+    calibrator: Any | None
+    calibration_target_mean: float | None
+    calibration_predictions: pd.DataFrame
+    calibration_diagnostics: pd.DataFrame
+    created_at_utc: str
+
+
+@dataclass(frozen=True)
+class MLForecastTrainingContext:
+    panel: pd.DataFrame
+    labels: pd.DataFrame
+    calibration_panel: pd.DataFrame
+    latest_date: pd.Timestamp
+    latest_features: pd.DataFrame
+    train: pd.DataFrame
+    candidate: CandidateSpec | None
+    feature_columns: tuple[str, ...]
+    target_column: str
+    horizon_days: int
+    model_factory: ModelFactory
+
+
+@dataclass(frozen=True)
+class MLForecastTrainingResult:
+    artifact: MLForecastModelArtifact
+
+    @property
+    def calibration_predictions(self) -> pd.DataFrame:
+        return self.artifact.calibration_predictions
+
+    @property
+    def calibration_diagnostics(self) -> pd.DataFrame:
+        return self.artifact.calibration_diagnostics
+
+
 def build_ml_optimizer_inputs(
     feature_panel: pd.DataFrame,
     labels_panel: pd.DataFrame,
@@ -52,68 +102,102 @@ def build_ml_optimizer_inputs_with_artifacts(
 ) -> MLOptimizerInputResult:
     """Train the selected Phase 2 blend and return optimizer inputs plus calibration artifacts."""
 
-    if feature_panel.empty:
-        msg = "Cannot build ML optimizer inputs from an empty feature panel"
-        raise ValueError(msg)
-
-    panel = _prepare_panel(feature_panel)
-    labels = _prepare_labels(labels_panel)
-    candidate = _candidate_from_model_version(config.ml_model_version)
-    target_column = _target_column(config, candidate)
-    if target_column not in labels.columns:
-        msg = f"labels panel is missing required ML target column: {target_column}"
-        raise ValueError(msg)
-
-    latest_date = panel["date"].max()
-    latest_features = panel.loc[panel["date"] == latest_date].copy()
-    if latest_features.empty:
-        msg = "No latest feature rows are available for ML inference"
-        raise ValueError(msg)
-    calibration_panel = panel.copy()
-
-    top_tickers = _top_liquidity_tickers(latest_features, config.ml_max_assets)
-    if top_tickers is not None:
-        panel = panel.loc[panel["ticker"].astype(str).isin(top_tickers)].copy()
-        latest_features = latest_features.loc[
-            latest_features["ticker"].astype(str).isin(top_tickers)
-        ].copy()
-
-    feature_columns = (
-        resolve_feature_columns(panel, candidate)
-        if candidate is not None
-        else _feature_columns(panel, config)
-    )
-    train = panel.merge(labels[["ticker", "date", target_column]], on=["ticker", "date"])
-    train = train.loc[(train["date"] < latest_date) & train[target_column].notna()].copy()
-    if train.empty:
-        msg = "No labeled training rows are available for ML optimizer input generation"
-        raise ValueError(msg)
-
-    model_factory = _model_factory(candidate, feature_columns, config, target_column)
-    model = model_factory(train)
-    forecast_score = np.asarray(model.predict(latest_features), dtype=float) * float(
-        config.ml_score_scale
+    training = train_ml_forecast_model_artifact(feature_panel, labels_panel, config)
+    return build_ml_optimizer_inputs_from_model_artifact(
+        feature_panel,
+        returns,
+        config,
+        training.artifact,
     )
 
-    optimizer_input = latest_features.copy()
-    optimizer_input["forecast_score"] = forecast_score
+
+def train_ml_forecast_model_artifact(
+    feature_panel: pd.DataFrame,
+    labels_panel: pd.DataFrame,
+    config: ForecastConfig,
+) -> MLForecastTrainingResult:
+    """Train the selected forecast model and package it as a reusable artifact."""
+
+    context = _training_context(feature_panel, labels_panel, config)
+    model = context.model_factory(context.train)
+    scored_latest = _score_latest_features(
+        context.latest_features,
+        model=model,
+        score_scale=float(config.ml_score_scale),
+    )
     calibration = _calibration_result(
-        panel=calibration_panel,
-        labels=labels,
-        latest_features=optimizer_input,
-        model_factory=model_factory,
-        feature_columns=feature_columns,
-        target_column=target_column,
-        horizon_days=_horizon_days(config, candidate),
+        panel=context.calibration_panel,
+        labels=context.labels,
+        latest_features=scored_latest,
+        model_factory=context.model_factory,
+        feature_columns=context.feature_columns,
+        target_column=context.target_column,
+        horizon_days=context.horizon_days,
         config=config,
     )
     calibration_enabled = (
         config.ml_calibration_enabled
         and config.ml_use_calibrated_expected_return
         and calibration.is_calibrated
+        and calibration.calibrator is not None
     )
-    if calibration_enabled:
-        calibrated = calibration.calibrated_latest.reindex(optimizer_input.index)
+    artifact = MLForecastModelArtifact(
+        model=model,
+        model_version=config.ml_model_version,
+        feature_columns=context.feature_columns,
+        target_column=context.target_column,
+        horizon_days=context.horizon_days,
+        score_scale=float(config.ml_score_scale),
+        trained_through_date=context.latest_date.date().isoformat(),
+        expected_return_is_calibrated=calibration_enabled,
+        calibration_status=_calibration_status(calibration),
+        calibration_method=config.ml_calibration_method,
+        calibration_target=config.ml_calibration_target,
+        calibration_shrinkage=float(calibration.calibration_shrinkage),
+        calibrator=calibration.calibrator if calibration_enabled else None,
+        calibration_target_mean=(
+            calibration.calibration_target_mean if calibration_enabled else None
+        ),
+        calibration_predictions=calibration.predictions,
+        calibration_diagnostics=calibration.diagnostics,
+        created_at_utc=datetime.now(UTC).isoformat(),
+    )
+    return MLForecastTrainingResult(artifact=artifact)
+
+
+def build_ml_optimizer_inputs_from_model_artifact(
+    feature_panel: pd.DataFrame,
+    returns: pd.DataFrame,
+    config: ForecastConfig,
+    artifact: MLForecastModelArtifact,
+) -> MLOptimizerInputResult:
+    """Build optimizer inputs for the latest date using a pre-trained model artifact."""
+
+    if feature_panel.empty:
+        msg = "Cannot build ML optimizer inputs from an empty feature panel"
+        raise ValueError(msg)
+
+    panel = _prepare_panel(feature_panel)
+    latest_date = panel["date"].max()
+    latest_features = panel.loc[panel["date"] == latest_date].copy()
+    if latest_features.empty:
+        msg = "No latest feature rows are available for ML inference"
+        raise ValueError(msg)
+
+    top_tickers = _top_liquidity_tickers(latest_features, config.ml_max_assets)
+    if top_tickers is not None:
+        latest_features = latest_features.loc[
+            latest_features["ticker"].astype(str).isin(top_tickers)
+        ].copy()
+    _validate_artifact_features(latest_features, artifact)
+
+    optimizer_input = latest_features.copy()
+    optimizer_input["forecast_score"] = np.asarray(
+        artifact.model.predict(latest_features),
+        dtype=float,
+    ) * float(artifact.score_scale)
+    if artifact.expected_return_is_calibrated and artifact.calibrator is not None:
+        calibrated = _apply_model_artifact_calibrator(artifact, optimizer_input["forecast_score"])
         optimizer_input["calibrated_expected_return"] = calibrated
         optimizer_input["expected_return"] = calibrated
         optimizer_input["expected_return_is_calibrated"] = True
@@ -121,7 +205,7 @@ def build_ml_optimizer_inputs_with_artifacts(
         optimizer_input["calibrated_expected_return"] = np.nan
         optimizer_input["expected_return"] = optimizer_input["forecast_score"]
         optimizer_input["expected_return_is_calibrated"] = False
-    optimizer_input["calibration_status"] = _calibration_status(calibration)
+    optimizer_input["calibration_status"] = artifact.calibration_status
     optimizer_input["volatility"] = _volatility(optimizer_input)
     optimizer_input["eligible_for_optimization"] = (
         np.isfinite(optimizer_input["expected_return"].astype(float))
@@ -130,7 +214,7 @@ def build_ml_optimizer_inputs_with_artifacts(
     )
     optimizer_input = _apply_benchmark_expected_return_gate(optimizer_input, config)
     optimizer_input["forecast_engine"] = "ml"
-    optimizer_input["forecast_model_version"] = config.ml_model_version
+    optimizer_input["forecast_model_version"] = artifact.model_version
     optimizer_input["as_of_date"] = latest_date.date().isoformat()
 
     columns = [
@@ -151,7 +235,7 @@ def build_ml_optimizer_inputs_with_artifacts(
         "expected_return_is_calibrated",
         "calibration_status",
         "as_of_date",
-        *feature_columns,
+        *artifact.feature_columns,
     ]
     for column in columns:
         if column not in optimizer_input.columns:
@@ -162,14 +246,121 @@ def build_ml_optimizer_inputs_with_artifacts(
         returns,
         result,
         config.covariance_lookback_days,
-        scale_days=_horizon_days(config, candidate) if calibration_enabled else 252,
+        scale_days=artifact.horizon_days if artifact.expected_return_is_calibrated else 252,
     )
     return MLOptimizerInputResult(
         optimizer_input=validate_columns(result, "optimizer_input"),
         covariance=covariance,
-        calibration_predictions=calibration.predictions,
-        calibration_diagnostics=calibration.diagnostics,
+        calibration_predictions=artifact.calibration_predictions,
+        calibration_diagnostics=artifact.calibration_diagnostics,
     )
+
+
+def _training_context(
+    feature_panel: pd.DataFrame,
+    labels_panel: pd.DataFrame,
+    config: ForecastConfig,
+) -> MLForecastTrainingContext:
+    if feature_panel.empty:
+        msg = "Cannot train an ML forecast model from an empty feature panel"
+        raise ValueError(msg)
+
+    panel = _prepare_panel(feature_panel)
+    labels = _prepare_labels(labels_panel)
+    candidate = _candidate_from_model_version(config.ml_model_version)
+    target_column = _target_column(config, candidate)
+    if target_column not in labels.columns:
+        msg = f"labels panel is missing required ML target column: {target_column}"
+        raise ValueError(msg)
+
+    latest_date = panel["date"].max()
+    latest_features = panel.loc[panel["date"] == latest_date].copy()
+    if latest_features.empty:
+        msg = "No latest feature rows are available for ML training"
+        raise ValueError(msg)
+    calibration_panel = panel.copy()
+
+    top_tickers = _top_liquidity_tickers(latest_features, config.ml_max_assets)
+    if top_tickers is not None:
+        panel = panel.loc[panel["ticker"].astype(str).isin(top_tickers)].copy()
+        latest_features = latest_features.loc[
+            latest_features["ticker"].astype(str).isin(top_tickers)
+        ].copy()
+
+    feature_columns = (
+        resolve_feature_columns(panel, candidate)
+        if candidate is not None
+        else _feature_columns(panel, config)
+    )
+    train = panel.merge(labels[["ticker", "date", target_column]], on=["ticker", "date"])
+    train = train.loc[(train["date"] < latest_date) & train[target_column].notna()].copy()
+    if train.empty:
+        msg = "No labeled training rows are available for ML model training"
+        raise ValueError(msg)
+
+    model_factory = _model_factory(candidate, feature_columns, config, target_column)
+    return MLForecastTrainingContext(
+        panel=panel,
+        labels=labels,
+        calibration_panel=calibration_panel,
+        latest_date=latest_date,
+        latest_features=latest_features,
+        train=train,
+        candidate=candidate,
+        feature_columns=feature_columns,
+        target_column=target_column,
+        horizon_days=_horizon_days(config, candidate),
+        model_factory=model_factory,
+    )
+
+
+def _score_latest_features(
+    latest_features: pd.DataFrame,
+    *,
+    model: Any,
+    score_scale: float,
+) -> pd.DataFrame:
+    scored = latest_features.copy()
+    scored["forecast_score"] = np.asarray(model.predict(latest_features), dtype=float) * float(
+        score_scale
+    )
+    return scored
+
+
+def _validate_artifact_features(
+    latest_features: pd.DataFrame,
+    artifact: MLForecastModelArtifact,
+) -> None:
+    missing = [column for column in artifact.feature_columns if column not in latest_features]
+    if missing:
+        msg = f"model artifact feature columns are missing from latest features: {missing}"
+        raise ValueError(msg)
+
+
+def _apply_model_artifact_calibrator(
+    artifact: MLForecastModelArtifact,
+    forecast_score: pd.Series,
+) -> pd.Series:
+    if artifact.calibrator is None:
+        msg = "Cannot apply calibration because the model artifact has no calibrator."
+        raise ValueError(msg)
+    scores = pd.to_numeric(forecast_score, errors="coerce").astype(float)
+    values = np.full(len(scores), np.nan, dtype=float)
+    finite = np.isfinite(scores.to_numpy(dtype=float))
+    if finite.any():
+        raw = np.asarray(
+            artifact.calibrator.predict(scores.to_numpy(dtype=float)[finite]),
+            dtype=float,
+        )
+        target_mean = (
+            0.0
+            if artifact.calibration_target_mean is None
+            else float(artifact.calibration_target_mean)
+        )
+        values[finite] = (1 - artifact.calibration_shrinkage) * raw + (
+            artifact.calibration_shrinkage * target_mean
+        )
+    return pd.Series(values, index=forecast_score.index, name="calibrated_expected_return")
 
 
 def _apply_benchmark_expected_return_gate(

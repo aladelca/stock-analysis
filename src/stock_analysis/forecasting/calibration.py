@@ -51,6 +51,9 @@ class ForecastCalibrationResult:
     calibrated_latest: pd.Series
     predictions: pd.DataFrame
     diagnostics: pd.DataFrame
+    calibrator: Any | None = None
+    calibration_target_mean: float | None = None
+    calibration_shrinkage: float = 0.0
 
     @property
     def is_calibrated(self) -> bool:
@@ -212,7 +215,14 @@ def calibrate_forecast_scores(
         index=latest_features.index,
         name="calibrated_expected_return",
     )
-    return ForecastCalibrationResult(calibrated_latest, predictions, diagnostics)
+    return ForecastCalibrationResult(
+        calibrated_latest,
+        predictions,
+        diagnostics,
+        calibrator=final_calibrator,
+        calibration_target_mean=final_target_mean,
+        calibration_shrinkage=shrinkage,
+    )
 
 
 def build_oos_prediction_frame(

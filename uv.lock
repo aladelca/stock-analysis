@@ -3468,6 +3468,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "catboost" },
+    { name = "cloudpickle" },
     { name = "cvxpy" },
     { name = "lightgbm" },
     { name = "lxml" },
@@ -3521,6 +3522,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "catboost", specifier = ">=1.2.8" },
+    { name = "cloudpickle", specifier = ">=3.0.0" },
     { name = "cvxpy", specifier = ">=1.4.3" },
     { name = "cwprep", marker = "extra == 'prepgen'", specifier = ">=0.5.5" },
     { name = "google-cloud-bigquery", marker = "extra == 'gcp'", specifier = ">=3.0.0" },

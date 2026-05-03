@@ -25,7 +25,11 @@ from stock_analysis.forecasting.calibration import (
     disabled_calibration_diagnostics,
     empty_calibration_predictions,
 )
-from stock_analysis.forecasting.ml_forecast import build_ml_optimizer_inputs_with_artifacts
+from stock_analysis.forecasting.ml_forecast import (
+    MLForecastModelArtifact,
+    build_ml_optimizer_inputs_from_model_artifact,
+    build_ml_optimizer_inputs_with_artifacts,
+)
 from stock_analysis.forecasting.outcomes import attach_forecast_outcomes
 from stock_analysis.ingestion.prices import PriceDownload, PriceProvider, YFinancePriceProvider
 from stock_analysis.ingestion.universe import (
@@ -71,6 +75,20 @@ class OneShotRunOutput:
     artifact_uris: list[str]
 
 
+@dataclass(frozen=True)
+class OneShotMedallionData:
+    requested_as_of_date: date
+    data_as_of_date: date
+    constituents: pd.DataFrame
+    daily_prices: pd.DataFrame
+    spy_daily: pd.DataFrame
+    returns: pd.DataFrame
+    feature_panel: pd.DataFrame
+    labels_panel: pd.DataFrame
+    features: pd.DataFrame
+    artifact_uris: list[str]
+
+
 def run_one_shot(
     config: PortfolioConfig,
     *,
@@ -91,24 +109,15 @@ def run_one_shot(
     return output.result
 
 
-def run_one_shot_with_store(
+def prepare_one_shot_medallion_data(
     config: PortfolioConfig,
     *,
     store: RunArtifactStore,
     universe_html: str | None = None,
     price_provider: PriceProvider | None = None,
-    account_repository: AccountTrackingRepository | None = None,
-    export_hyper: bool | None = None,
-    log_mlflow: bool | None = None,
-    write_tableau_dashboard_mart: bool = False,
-    include_account_history: bool = False,
-) -> OneShotRunOutput:
+) -> OneShotMedallionData:
     requested_as_of_date = config.run.as_of_date or date.today()
-    run_id = store.run_id
-    should_export_hyper = config.tableau.export_hyper if export_hyper is None else export_hyper
-    should_log_mlflow = config.mlflow.enabled if log_mlflow is None else log_mlflow
-
-    logger.info("Starting one-shot run %s for %s", run_id, requested_as_of_date.isoformat())
+    logger.info("Starting one-shot data prep %s for %s", store.run_id, requested_as_of_date)
 
     html = universe_html or fetch_sp500_html(config.universe.source_url)
     constituents = parse_sp500_constituents(html, requested_as_of_date)
@@ -203,20 +212,83 @@ def run_one_shot_with_store(
         benchmark_returns=benchmark_returns,
         horizons=config.forecast.label_horizons,
     )
-    artifact_uris: list[str] = []
-    artifact_uris.extend(_write_gold_with_csv(store, "labels_panel", labels_panel))
+    artifact_uris = _write_gold_with_csv(store, "labels_panel", labels_panel)
 
     features = compute_asset_daily_features(asset_daily_prices, constituents, config.features)
     _write_silver_table(features, "asset_daily_features", store)
+    return OneShotMedallionData(
+        requested_as_of_date=requested_as_of_date,
+        data_as_of_date=data_as_of_date,
+        constituents=constituents,
+        daily_prices=daily_prices,
+        spy_daily=spy_daily,
+        returns=returns,
+        feature_panel=feature_panel,
+        labels_panel=labels_panel,
+        features=features,
+        artifact_uris=artifact_uris,
+    )
+
+
+def run_one_shot_with_store(
+    config: PortfolioConfig,
+    *,
+    store: RunArtifactStore,
+    universe_html: str | None = None,
+    price_provider: PriceProvider | None = None,
+    account_repository: AccountTrackingRepository | None = None,
+    export_hyper: bool | None = None,
+    log_mlflow: bool | None = None,
+    write_tableau_dashboard_mart: bool = False,
+    include_account_history: bool = False,
+    ml_model_artifact: MLForecastModelArtifact | None = None,
+    ml_model_artifact_uri: str | None = None,
+) -> OneShotRunOutput:
+    run_id = store.run_id
+    should_export_hyper = config.tableau.export_hyper if export_hyper is None else export_hyper
+    should_log_mlflow = config.mlflow.enabled if log_mlflow is None else log_mlflow
+
+    medallion = prepare_one_shot_medallion_data(
+        config,
+        store=store,
+        universe_html=universe_html,
+        price_provider=price_provider,
+    )
+    requested_as_of_date = medallion.requested_as_of_date
+    data_as_of_date = medallion.data_as_of_date
+    data_as_of_date_str = data_as_of_date.isoformat()
+    constituents = medallion.constituents
+    daily_prices = medallion.daily_prices
+    spy_daily = medallion.spy_daily
+    returns = medallion.returns
+    feature_panel = medallion.feature_panel
+    labels_panel = medallion.labels_panel
+    features = medallion.features
+    artifact_uris: list[str] = list(medallion.artifact_uris)
+    forecast_horizon_days = (
+        ml_model_artifact.horizon_days
+        if config.forecast.engine == "ml" and ml_model_artifact is not None
+        else config.forecast.ml_horizon_days
+    )
+    logger.info("Starting one-shot run %s for %s", run_id, requested_as_of_date.isoformat())
 
     calibration_predictions = empty_calibration_predictions()
     calibration_diagnostics = _calibration_diagnostics_disabled(config)
     if config.forecast.engine == "ml":
-        ml_result = build_ml_optimizer_inputs_with_artifacts(
-            feature_panel,
-            labels_panel,
-            returns,
-            config.forecast,
+        ml_result = (
+            build_ml_optimizer_inputs_from_model_artifact(
+                feature_panel,
+                returns,
+                config.forecast,
+                ml_model_artifact,
+            )
+            if ml_model_artifact is not None
+            else build_ml_optimizer_inputs_with_artifacts(
+                feature_panel,
+                labels_panel,
+                returns,
+                config.forecast,
+            )
         )
         optimizer_input = ml_result.optimizer_input
         covariance = ml_result.covariance
@@ -275,7 +347,7 @@ def run_one_shot_with_store(
     recommendations = attach_forecast_outcomes(
         recommendations,
         daily_prices,
-        horizon_days=config.forecast.ml_horizon_days,
+        horizon_days=forecast_horizon_days,
         run_data_as_of_date=data_as_of_date,
         benchmark_ticker=config.prices.benchmark_tickers[0],
     )
@@ -296,6 +368,9 @@ def run_one_shot_with_store(
         daily_prices,
         calibration_diagnostics=calibration_diagnostics,
         live_state=live_state,
+        ml_model_artifact=ml_model_artifact,
+        ml_model_artifact_uri=ml_model_artifact_uri,
+        forecast_horizon_days=forecast_horizon_days,
     )
 
     gold_tables: dict[str, pd.DataFrame] = {
@@ -358,7 +433,7 @@ def run_one_shot_with_store(
             repository=live_repository,
             account_slug=config.live_account.account_slug,
             daily_prices=daily_prices,
-            default_horizon_days=config.forecast.ml_horizon_days,
+            default_horizon_days=forecast_horizon_days,
             benchmark_ticker=config.prices.benchmark_tickers[0],
         )
         for name, table in history_tables.items():
@@ -823,6 +898,9 @@ def _build_run_metadata(
     *,
     calibration_diagnostics: pd.DataFrame | None = None,
     live_state: LivePortfolioState | None = None,
+    ml_model_artifact: MLForecastModelArtifact | None = None,
+    ml_model_artifact_uri: str | None = None,
+    forecast_horizon_days: int | None = None,
 ) -> pd.DataFrame:
     config_json = config.model_dump_json(exclude={"run": {"as_of_date"}})
     config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
@@ -839,9 +917,17 @@ def _build_run_metadata(
             config.forecast.ml_model_version if config.forecast.engine == "ml" else "heuristic"
         ),
         "model_family": ("ridge_lightgbm_blend" if config.forecast.engine == "ml" else "heuristic"),
+        "model_artifact_uri": ml_model_artifact_uri or "",
+        "model_trained_through_date": (
+            ml_model_artifact.trained_through_date if ml_model_artifact is not None else ""
+        ),
+        "model_created_at_utc": (
+            ml_model_artifact.created_at_utc if ml_model_artifact is not None else ""
+        ),
+        "forecast_horizon_days": forecast_horizon_days or config.forecast.ml_horizon_days,
         "expected_return_is_calibrated": expected_return_is_calibrated,
         "optimizer_return_unit": (
-            f"{config.forecast.ml_horizon_days}d_return"
+            f"{forecast_horizon_days or config.forecast.ml_horizon_days}d_return"
             if expected_return_is_calibrated
             else "score"
         ),

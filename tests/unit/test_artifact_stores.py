@@ -57,10 +57,16 @@ def test_gcs_artifact_store_builds_run_scoped_uris_and_writes_objects() -> None:
     store.write_json(store.raw_uri("sp500_constituents", "metadata.json"), {"run_id": "run-1"})
     parquet_uri = store.write_parquet(store.table_uri("gold", "portfolio_recommendations"), frame)
     store.write_csv(store.csv_uri("gold", "portfolio_recommendations"), frame)
+    bytes_uri = store.write_bytes(
+        "gs://stock-analysis-medallion-prod/runs/run-1/model/model.cloudpickle",
+        b"model",
+        content_type="application/octet-stream",
+    )
 
     assert client.bucket_names == ["stock-analysis-medallion-prod"]
     assert store.exists(parquet_uri)
     assert store.read_parquet(parquet_uri).equals(frame)
+    assert store.read_bytes(bytes_uri) == b"model"
     assert store.local_path(parquet_uri) is None
 
 
@@ -96,9 +102,9 @@ class FakeBlob:
         self.name = name
         self.content = b""
 
-    def upload_from_string(self, content: str, content_type: str | None = None) -> None:
+    def upload_from_string(self, content: str | bytes, content_type: str | None = None) -> None:
         del content_type
-        self.content = content.encode("utf-8")
+        self.content = content if isinstance(content, bytes) else content.encode("utf-8")
 
     def upload_from_file(self, file_obj, content_type: str | None = None) -> None:
         del content_type

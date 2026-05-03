@@ -82,6 +82,14 @@ class GcsArtifactStore:
         blob.upload_from_string(frame.to_csv(index=False), content_type="text/csv")
         return uri
 
+    def write_bytes(self, uri: str, content: bytes, *, content_type: str | None = None) -> str:
+        blob = self._blob_for_uri(uri)
+        blob.upload_from_string(content, content_type=content_type)
+        return uri
+
+    def read_bytes(self, uri: str) -> bytes:
+        return self._blob_for_uri(uri).download_as_bytes()
+
     def read_parquet(self, uri: str) -> pd.DataFrame:
         blob = self._blob_for_uri(uri)
         buffer = BytesIO(blob.download_as_bytes())

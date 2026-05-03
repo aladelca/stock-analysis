@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from stock_analysis import cli
 from stock_analysis.domain.models import PipelineResult
+from stock_analysis.pipeline.gcp_model_training import GcpModelTrainingResult
 from stock_analysis.pipeline.gcp_one_shot import GcpPipelineResult
 from stock_analysis.storage.contracts import (
     AccountRecord,
@@ -179,6 +180,42 @@ gcp:
     assert "Completed GCP run" in result.output
     assert "gs://bucket/runs/gcp-run-1" in result.output
     assert "project.gold.portfolio_dashboard_mart" in result.output
+
+
+def test_train_gcp_model_command_prints_model_artifact(tmp_path: Path, monkeypatch) -> None:
+    def fake_run_gcp_model_training(config, *, promote):
+        assert config.gcp.enabled is True
+        assert promote is True
+        return GcpModelTrainingResult(
+            run_id="train-run-1",
+            gcs_run_root="gs://bucket/runs/train-run-1",
+            model_uri="gs://bucket/models/runs/train-run-1/model.cloudpickle",
+            production_model_uri="gs://bucket/models/production/model.cloudpickle",
+            artifact_uris=[],
+        )
+
+    monkeypatch.setattr(cli, "run_gcp_model_training", fake_run_gcp_model_training)
+    config_path = tmp_path / "portfolio.gcp.yaml"
+    config_path.write_text(
+        """
+forecast:
+  engine: ml
+gcp:
+  enabled: true
+  project_id: project
+  bucket: bucket
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["train-gcp-model", "--config", str(config_path), "--forecast-engine", "ml"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Completed GCP model training" in result.output
+    assert "gs://bucket/models/production/model.cloudpickle" in result.output
 
 
 runner = CliRunner()

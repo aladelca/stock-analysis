@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -9,6 +10,7 @@ from stock_analysis.config import PortfolioConfig
 from stock_analysis.domain.models import PipelineResult
 from stock_analysis.gcp.bigquery import publish_gold_tables_to_bigquery
 from stock_analysis.gcp.gcs_store import GcsArtifactStore
+from stock_analysis.gcp.model_registry import GcsModelRegistry
 from stock_analysis.ingestion.prices import PriceProvider
 from stock_analysis.pipeline.one_shot import OneShotRunOutput, run_one_shot_with_store
 from stock_analysis.storage.contracts import AccountTrackingRepository
@@ -20,6 +22,7 @@ BIGQUERY_GOLD_TABLES = (
     "sector_exposure",
     "run_metadata",
 )
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,7 @@ class GcpPipelineResult:
     pipeline: PipelineResult
     gcs_run_root: str
     bigquery_tables: dict[str, str]
+    model_artifact_uri: str | None = None
 
 
 def run_gcp_one_shot(
@@ -54,6 +58,22 @@ def run_gcp_one_shot(
         run_id=run_id,
         storage_client=storage_client,
     )
+    ml_model_artifact = None
+    ml_model_artifact_uri = None
+    if config.forecast.engine == "ml":
+        model_registry = GcsModelRegistry(config.gcp, storage_client=storage_client)
+        ml_model_artifact_uri = config.gcp.model_artifact_uri or model_registry.default_model_uri()
+        if not model_registry.exists(ml_model_artifact_uri):
+            msg = (
+                "No GCS ML model artifact found at "
+                f"{ml_model_artifact_uri}. Run `stock-analysis train-gcp-model "
+                "--config configs/portfolio.gcp.yaml --forecast-engine ml` first."
+            )
+            raise ValueError(msg)
+        logger.info("Loading ML model artifact from %s", ml_model_artifact_uri)
+        ml_model_artifact = model_registry.load_artifact(ml_model_artifact_uri)
+        _validate_model_artifact_contract(config, ml_model_artifact_uri, ml_model_artifact)
+
     output = run_one_shot_with_store(
         config,
         store=store,
@@ -64,6 +84,8 @@ def run_gcp_one_shot(
         log_mlflow=config.mlflow.enabled,
         write_tableau_dashboard_mart=True,
         include_account_history=True,
+        ml_model_artifact=ml_model_artifact,
+        ml_model_artifact_uri=ml_model_artifact_uri,
     )
     bigquery_tables: dict[str, str] = {}
     if config.gcp.publish_bigquery:
@@ -77,6 +99,7 @@ def run_gcp_one_shot(
         pipeline=output.result,
         gcs_run_root=store.run_root_uri,
         bigquery_tables=bigquery_tables,
+        model_artifact_uri=ml_model_artifact_uri,
     )
 
 
@@ -88,3 +111,17 @@ def _bigquery_publish_tables(output: OneShotRunOutput) -> dict[str, pd.DataFrame
     }
     tables.update(output.tableau_tables)
     return tables
+
+
+def _validate_model_artifact_contract(
+    config: PortfolioConfig,
+    model_artifact_uri: str,
+    artifact: object,
+) -> None:
+    model_version = getattr(artifact, "model_version", None)
+    if model_version != config.forecast.ml_model_version:
+        msg = (
+            f"Model artifact {model_artifact_uri} was trained for {model_version!r}, "
+            f"but config.forecast.ml_model_version is {config.forecast.ml_model_version!r}."
+        )
+        raise ValueError(msg)

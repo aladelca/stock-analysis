@@ -62,6 +62,16 @@ class LocalArtifactStore:
         frame.to_csv(path, index=False)
         return str(path)
 
+    def write_bytes(self, uri: str, content: bytes, *, content_type: str | None = None) -> str:
+        del content_type
+        path = Path(uri)
+        ensure_parent(path)
+        path.write_bytes(content)
+        return str(path)
+
+    def read_bytes(self, uri: str) -> bytes:
+        return Path(uri).read_bytes()
+
     def read_parquet(self, uri: str) -> pd.DataFrame:
         return pd.read_parquet(Path(uri))
 

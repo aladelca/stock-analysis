@@ -37,6 +37,12 @@ class RunArtifactStore(Protocol):
     def write_csv(self, uri: str, frame: pd.DataFrame) -> str:
         """Write a DataFrame as CSV and return the written URI."""
 
+    def write_bytes(self, uri: str, content: bytes, *, content_type: str | None = None) -> str:
+        """Write bytes and return the written URI."""
+
+    def read_bytes(self, uri: str) -> bytes:
+        """Read a binary artifact."""
+
     def read_parquet(self, uri: str) -> pd.DataFrame:
         """Read a Parquet artifact."""
 

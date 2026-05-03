@@ -3,11 +3,27 @@
 This runbook deploys the additive GCP pipeline. It does not replace the local `run-one-shot`
 workflow.
 
-The cloud command is:
+The cloud flow has two commands:
 
 ```bash
+stock-analysis train-gcp-model --config configs/portfolio.gcp.yaml --forecast-engine ml
 stock-analysis run-gcp-one-shot --config configs/portfolio.gcp.yaml --forecast-engine ml
 ```
+
+`train-gcp-model` trains/calibrates the ML forecast model and writes a versioned model bundle to
+Cloud Storage. By default it also promotes the same bundle to the production model path used by
+inference:
+
+```text
+gs://<bucket>/models/runs/<training_run_id>/model.cloudpickle
+gs://<bucket>/models/runs/<training_run_id>/metadata.json
+gs://<bucket>/models/runs/<training_run_id>/calibration_diagnostics.parquet
+gs://<bucket>/models/runs/<training_run_id>/calibration_predictions.parquet
+gs://<bucket>/models/production/model.cloudpickle
+```
+
+`run-gcp-one-shot` loads the configured model artifact from Cloud Storage and does not retrain. If
+no production model exists yet, the command fails and tells you to run `train-gcp-model` first.
 
 It writes medallion artifacts directly to Cloud Storage:
 
@@ -19,7 +35,7 @@ gs://<bucket>/runs/<run_id>/gold/
 ```
 
 It also publishes Tableau-ready tables to BigQuery when `gcp.publish_bigquery: true`.
-Run-scoped tables are appendable and deduplicated by `run_id`; Supabase-derived history tables are
+Run-scoped tables are appendable and deduplicated by `run_id`; account history tables are
 full refreshed for the account so repeated on-demand executions do not duplicate older history rows.
 
 ## Preconditions
@@ -46,7 +62,6 @@ gcloud services enable \
   artifactregistry.googleapis.com \
   bigquery.googleapis.com \
   run.googleapis.com \
-  secretmanager.googleapis.com \
   storage.googleapis.com
 ```
 
@@ -109,13 +124,9 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/bigquery.dataEditor"
 
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
 ```
 
-For tighter production IAM, scope BigQuery and Secret Manager permissions to the dataset/secrets
-instead of the whole project.
+For tighter production IAM, scope BigQuery permissions to the dataset instead of the whole project.
 
 ## Configure The Cloud YAML
 
@@ -128,29 +139,41 @@ gcp:
   region: us-central1
   bucket: <bucket>
   gcs_prefix: runs
+  model_registry_prefix: models
+  model_artifact_uri: null
   bigquery_location: US
   bigquery_dataset_gold: stock_analysis_gold
   publish_bigquery: true
 ```
 
-If the cloud run should use Supabase account tracking, set:
+Leave `model_artifact_uri: null` for normal operation. The inference job will read:
+
+```text
+gs://<bucket>/models/production/model.cloudpickle
+```
+
+Set `model_artifact_uri` only when you want to pin inference to a specific versioned model, for
+example:
+
+```yaml
+gcp:
+  model_artifact_uri: gs://<bucket>/models/runs/20260503T150000Z/model.cloudpickle
+```
+
+The GCP path should use Cloud Storage and BigQuery only. Leave Supabase disabled:
 
 ```yaml
 live_account:
-  enabled: true
-  account_slug: main
-  cashflow_source: actual
+  enabled: false
+  account_slug: null
+  cashflow_source: scenario
 
 supabase:
-  enabled: true
+  enabled: false
 ```
 
-Then create secrets:
-
-```bash
-printf '%s' '<supabase_url>' | gcloud secrets create SUPABASE_URL --data-file=-
-printf '%s' '<service_role_key>' | gcloud secrets create SUPABASE_SERVICE_ROLE_KEY --data-file=-
-```
+Account tracking should move to a BigQuery-backed repository before enabling actual cloud
+cashflows/snapshots.
 
 ## Build And Push
 
@@ -174,22 +197,22 @@ Push:
 docker push "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE}:latest"
 ```
 
-## Create The Cloud Run Job
+## Create The Cloud Run Jobs
 
-Without Supabase secrets:
+Create the training job:
 
 ```bash
-gcloud run jobs create stock-analysis-one-shot \
+gcloud run jobs create stock-analysis-train-model \
   --image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE}:latest" \
   --region="${REGION}" \
   --service-account="${SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com" \
   --memory=8Gi \
   --cpu=4 \
   --task-timeout=3600 \
-  --args="run-gcp-one-shot,--config,configs/portfolio.gcp.yaml,--forecast-engine,ml"
+  --args="train-gcp-model,--config,configs/portfolio.gcp.yaml,--forecast-engine,ml"
 ```
 
-With Supabase secrets:
+Create the inference/recommendation job:
 
 ```bash
 gcloud run jobs create stock-analysis-one-shot \
@@ -199,11 +222,20 @@ gcloud run jobs create stock-analysis-one-shot \
   --memory=8Gi \
   --cpu=4 \
   --task-timeout=3600 \
-  --set-secrets="SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY:latest" \
   --args="run-gcp-one-shot,--config,configs/portfolio.gcp.yaml,--forecast-engine,ml"
 ```
 
 ## Execute On Demand
+
+Train and promote the current model:
+
+```bash
+gcloud run jobs execute stock-analysis-train-model \
+  --region="${REGION}" \
+  --wait
+```
+
+Then run recommendations from the promoted model:
 
 ```bash
 gcloud run jobs execute stock-analysis-one-shot \
@@ -215,6 +247,10 @@ Inspect logs:
 
 ```bash
 gcloud run jobs executions list \
+  --job=stock-analysis-train-model \
+  --region="${REGION}"
+
+gcloud run jobs executions list \
   --job=stock-analysis-one-shot \
   --region="${REGION}"
 ```
@@ -223,6 +259,14 @@ List GCS outputs:
 
 ```bash
 gcloud storage ls "gs://${BUCKET}/runs/"
+gcloud storage ls "gs://${BUCKET}/models/production/"
+gcloud storage ls "gs://${BUCKET}/models/runs/"
+```
+
+Training run gold outputs include `model_metadata.parquet` and `model_metadata.csv` under:
+
+```text
+gs://<bucket>/runs/<training_run_id>/gold/
 ```
 
 Inspect BigQuery tables:
@@ -263,5 +307,7 @@ Use `run_id`, `as_of_date`, and `run_data_as_of_date` as dashboard filters.
 
 - The local pipeline still writes to `data/runs/<run_id>/`.
 - The GCP pipeline writes directly to Cloud Storage through `GcsArtifactStore`.
+- GCP model artifacts are stored directly in Cloud Storage through `GcsModelRegistry`.
+- Inference loads the promoted GCS model artifact and refuses to retrain implicitly.
 - Cloud Scheduler is intentionally not configured in this phase.
 - Tableau Hyper export is skipped in the cloud command; BigQuery is the cloud serving layer.

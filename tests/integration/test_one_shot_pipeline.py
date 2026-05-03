@@ -20,6 +20,7 @@ from stock_analysis.config import (
 )
 from stock_analysis.ingestion.prices import PriceDownload
 from stock_analysis.pipeline import gcp_one_shot
+from stock_analysis.pipeline.gcp_model_training import run_gcp_model_training
 from stock_analysis.pipeline.gcp_one_shot import run_gcp_one_shot
 from stock_analysis.pipeline.one_shot import run_one_shot
 from stock_analysis.storage.contracts import (
@@ -433,6 +434,63 @@ def test_gcp_one_shot_pipeline_writes_direct_gcs_artifacts_and_publishes_tables(
     )
 
 
+def test_gcp_ml_training_promotes_model_and_inference_loads_it_from_gcs(
+    sample_html,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    storage_client = FakeStorageClient()
+    published: dict[str, pd.DataFrame] = {}
+
+    def fake_publish(tables, config, *, run_id, bigquery_client=None):
+        del config, run_id, bigquery_client
+        published.update({name: table.copy() for name, table in tables.items()})
+        return {name: f"project.gold.{name}" for name in tables}
+
+    train_config = _ml_portfolio_config(tmp_path, "train-run")
+    train_config.gcp.enabled = True
+    train_config.gcp.project_id = "project"
+    train_config.gcp.bucket = "stock-analysis-medallion-test"
+    train_config.gcp.gcs_prefix = "runs"
+    train_config.gcp.publish_bigquery = False
+    train_result = run_gcp_model_training(
+        train_config,
+        universe_html=sample_html,
+        price_provider=_LongStaticPriceProvider(_ml_fixture_prices()),
+        storage_client=storage_client,
+    )
+
+    assert train_result.model_uri == (
+        "gs://stock-analysis-medallion-test/models/runs/train-run/model.cloudpickle"
+    )
+    assert train_result.production_model_uri == (
+        "gs://stock-analysis-medallion-test/models/production/model.cloudpickle"
+    )
+
+    infer_config = _ml_portfolio_config(tmp_path, "infer-run")
+    infer_config.gcp.enabled = True
+    infer_config.gcp.project_id = "project"
+    infer_config.gcp.bucket = "stock-analysis-medallion-test"
+    infer_config.gcp.gcs_prefix = "runs"
+    infer_config.gcp.publish_bigquery = True
+    monkeypatch.setattr(gcp_one_shot, "publish_gold_tables_to_bigquery", fake_publish)
+
+    infer_result = run_gcp_one_shot(
+        infer_config,
+        universe_html=sample_html,
+        price_provider=_LongStaticPriceProvider(_ml_fixture_prices()),
+        storage_client=storage_client,
+    )
+
+    assert infer_result.model_artifact_uri == train_result.production_model_uri
+    assert infer_result.gcs_run_root == "gs://stock-analysis-medallion-test/runs/infer-run"
+    assert "portfolio_recommendations" in published
+    metadata = published["run_metadata"]
+    assert metadata["model_artifact_uri"].iat[0] == train_result.production_model_uri
+    assert metadata["model_trained_through_date"].iat[0] == "2026-04-03"
+    assert metadata["forecast_horizon_days"].iat[0] == 5
+
+
 class FakeAccountTrackingRepository:
     def __init__(self) -> None:
         self.account = AccountRecord(id="account-1", slug="main", display_name="Main")
@@ -620,9 +678,9 @@ class FakeBlob:
     def __init__(self) -> None:
         self.content = b""
 
-    def upload_from_string(self, content: str, content_type: str | None = None) -> None:
+    def upload_from_string(self, content: str | bytes, content_type: str | None = None) -> None:
         del content_type
-        self.content = content.encode("utf-8")
+        self.content = content if isinstance(content, bytes) else content.encode("utf-8")
 
     def upload_from_file(self, file_obj, content_type: str | None = None) -> None:
         del content_type

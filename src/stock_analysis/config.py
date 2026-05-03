@@ -184,6 +184,8 @@ class GcpConfig(BaseModel):
     region: str = "us-central1"
     bucket: str | None = None
     gcs_prefix: str = "runs"
+    model_registry_prefix: str = "models"
+    model_artifact_uri: str | None = None
     bigquery_location: str = "US"
     bigquery_dataset_gold: str = "stock_analysis_gold"
     bigquery_dataset_metadata: str = "stock_analysis_metadata"
@@ -199,6 +201,11 @@ class GcpConfig(BaseModel):
             msg = "gcp.bucket cannot be blank"
             raise ValueError(msg)
         return cleaned
+
+    @field_validator("gcs_prefix", "model_registry_prefix")
+    @classmethod
+    def _normalize_prefix(cls, value: str) -> str:
+        return value.strip("/")
 
 
 class PortfolioConfig(BaseModel):
