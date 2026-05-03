@@ -178,6 +178,29 @@ class MLflowConfig(BaseModel):
     experiment_name: str = "stock-analysis-portfolio"
 
 
+class GcpConfig(BaseModel):
+    enabled: bool = False
+    project_id: str | None = None
+    region: str = "us-central1"
+    bucket: str | None = None
+    gcs_prefix: str = "runs"
+    bigquery_location: str = "US"
+    bigquery_dataset_gold: str = "stock_analysis_gold"
+    bigquery_dataset_metadata: str = "stock_analysis_metadata"
+    publish_bigquery: bool = True
+
+    @field_validator("bucket")
+    @classmethod
+    def _normalize_bucket(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.removeprefix("gs://").strip("/")
+        if not cleaned:
+            msg = "gcp.bucket cannot be blank"
+            raise ValueError(msg)
+        return cleaned
+
+
 class PortfolioConfig(BaseModel):
     run: RunConfig = Field(default_factory=RunConfig)
     universe: UniverseConfig = Field(default_factory=UniverseConfig)
@@ -193,6 +216,7 @@ class PortfolioConfig(BaseModel):
     supabase: SupabaseConfig = Field(default_factory=SupabaseConfig)
     tableau: TableauConfig = Field(default_factory=TableauConfig)
     mlflow: MLflowConfig = Field(default_factory=MLflowConfig)
+    gcp: GcpConfig = Field(default_factory=GcpConfig)
 
 
 def load_config(path: Path) -> PortfolioConfig:

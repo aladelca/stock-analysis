@@ -94,7 +94,7 @@ GcsArtifactStore   -> gs:// objects
 | Secrets | Secret Manager |
 | Runtime identity | Cloud Run service account |
 | Logs | Cloud Logging |
-| Python GCS writes | `gcsfs` or `google-cloud-storage` |
+| Python GCS writes | `google-cloud-storage` |
 | Python BigQuery writes | `google-cloud-bigquery` |
 
 Recommended Python dependency group:
@@ -102,7 +102,6 @@ Recommended Python dependency group:
 ```toml
 [project.optional-dependencies]
 gcp = [
-  "gcsfs>=2025.0.0",
   "google-cloud-bigquery>=3.0.0",
   "google-cloud-storage>=2.0.0",
 ]
@@ -183,9 +182,9 @@ Initial BigQuery tables:
 | `stock_analysis_gold.sector_exposure` | Idempotent append by `run_id` | Allocation views |
 | `stock_analysis_gold.run_metadata` | Idempotent append by `run_id` | Data freshness and model status |
 | `stock_analysis_gold.forecast_calibration_diagnostics` | Idempotent append by `run_id` | Calibration health |
-| `stock_analysis_gold.recommendation_runs_history` | Merge by Supabase row id or `run_id` | Run history |
-| `stock_analysis_gold.recommendation_lines_history` | Merge by recommendation line id | Forecast/outcome history |
-| `stock_analysis_gold.performance_snapshots_history` | Merge by account/date | Account vs SPY |
+| `stock_analysis_gold.recommendation_runs_history` | Full refresh from Supabase history | Run history |
+| `stock_analysis_gold.recommendation_lines_history` | Full refresh from Supabase history | Forecast/outcome history |
+| `stock_analysis_gold.performance_snapshots_history` | Full refresh from Supabase history | Account vs SPY |
 | `stock_analysis_gold.tableau_dashboard_mart` | Idempotent append or current-view table | Main Tableau dashboard |
 
 Recommended idempotency:
@@ -195,8 +194,8 @@ Recommended idempotency:
 3. Insert from staging into target.
 4. Drop staging.
 
-For v1, if implementation time is tight, use delete-by-`run_id` plus append for run-scoped tables.
-Use merge for history tables where a stable Supabase id exists.
+For v1, use delete-by-`run_id` plus append for run-scoped tables. Use full-refresh writes for
+Supabase-derived history tables so repeated on-demand runs do not duplicate older history rows.
 
 Recommended partitioning and clustering:
 

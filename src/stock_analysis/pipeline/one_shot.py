@@ -4,14 +4,19 @@ import hashlib
 import json
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
 
+from stock_analysis.artifacts.local_store import LocalArtifactStore
+from stock_analysis.artifacts.store import RunArtifactStore, write_table_with_csv
 from stock_analysis.benchmarks.spy import build_benchmark_returns, build_spy_daily
 from stock_analysis.config import PortfolioConfig
 from stock_analysis.domain.models import PipelineResult
+from stock_analysis.domain.schemas import validate_columns
 from stock_analysis.env import load_local_env
 from stock_analysis.features.panel import compute_asset_feature_panel
 from stock_analysis.features.price_features import compute_asset_daily_features
@@ -23,19 +28,14 @@ from stock_analysis.forecasting.calibration import (
 from stock_analysis.forecasting.ml_forecast import build_ml_optimizer_inputs_with_artifacts
 from stock_analysis.forecasting.outcomes import attach_forecast_outcomes
 from stock_analysis.ingestion.prices import PriceDownload, PriceProvider, YFinancePriceProvider
-from stock_analysis.ingestion.raw_store import write_json, write_text
 from stock_analysis.ingestion.universe import (
     fetch_sp500_html,
     normalize_provider_ticker,
     parse_sp500_constituents,
 )
-from stock_analysis.io.csv import write_csv
-from stock_analysis.io.parquet import write_parquet
-from stock_analysis.medallion.bronze import write_bronze_constituents, write_bronze_prices
 from stock_analysis.medallion.silver import (
     build_asset_daily_returns,
     build_asset_universe_snapshot,
-    write_silver_table,
 )
 from stock_analysis.ml.labels import build_forward_return_labels
 from stock_analysis.ml.mlflow_tracking import log_portfolio_run
@@ -45,7 +45,6 @@ from stock_analysis.optimization.recommendations import (
     build_risk_metrics,
     build_sector_exposure,
 )
-from stock_analysis.paths import ProjectPaths
 from stock_analysis.portfolio.holdings import PortfolioState, load_portfolio_state
 from stock_analysis.portfolio.live_state import LivePortfolioState, build_live_portfolio_state
 from stock_analysis.portfolio.rebalance import build_rebalance_context
@@ -56,11 +55,20 @@ from stock_analysis.storage.contracts import (
     RecommendationRunRecord,
 )
 from stock_analysis.storage.supabase import create_account_tracking_repository
+from stock_analysis.tableau.account_history_marts import build_account_history_marts
 from stock_analysis.tableau.account_tracking_marts import build_account_tracking_marts
 from stock_analysis.tableau.dashboard_mart import build_dashboard_mart
 from stock_analysis.tableau.hyper import export_hyper_if_available
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class OneShotRunOutput:
+    result: PipelineResult
+    gold_tables: dict[str, pd.DataFrame]
+    tableau_tables: dict[str, pd.DataFrame]
+    artifact_uris: list[str]
 
 
 def run_one_shot(
@@ -70,9 +78,35 @@ def run_one_shot(
     price_provider: PriceProvider | None = None,
     account_repository: AccountTrackingRepository | None = None,
 ) -> PipelineResult:
-    requested_as_of_date = config.run.as_of_date or date.today()
     run_id = config.run.run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    paths = ProjectPaths(config.run.output_root, run_id)
+    output = run_one_shot_with_store(
+        config,
+        store=LocalArtifactStore(config.run.output_root, run_id),
+        universe_html=universe_html,
+        price_provider=price_provider,
+        account_repository=account_repository,
+        export_hyper=config.tableau.export_hyper,
+        log_mlflow=config.mlflow.enabled,
+    )
+    return output.result
+
+
+def run_one_shot_with_store(
+    config: PortfolioConfig,
+    *,
+    store: RunArtifactStore,
+    universe_html: str | None = None,
+    price_provider: PriceProvider | None = None,
+    account_repository: AccountTrackingRepository | None = None,
+    export_hyper: bool | None = None,
+    log_mlflow: bool | None = None,
+    write_tableau_dashboard_mart: bool = False,
+    include_account_history: bool = False,
+) -> OneShotRunOutput:
+    requested_as_of_date = config.run.as_of_date or date.today()
+    run_id = store.run_id
+    should_export_hyper = config.tableau.export_hyper if export_hyper is None else export_hyper
+    should_log_mlflow = config.mlflow.enabled if log_mlflow is None else log_mlflow
 
     logger.info("Starting one-shot run %s for %s", run_id, requested_as_of_date.isoformat())
 
@@ -110,24 +144,22 @@ def run_one_shot(
     daily_prices["as_of_date"] = data_as_of_date_str
     constituents["as_of_date"] = data_as_of_date_str
 
-    universe_raw_dir = paths.raw_dir("sp500_constituents")
-    write_text(universe_raw_dir / "source.html", html)
-    write_json(
-        universe_raw_dir / "metadata.json",
+    store.write_text(store.raw_uri("sp500_constituents", "source.html"), html)
+    store.write_json(
+        store.raw_uri("sp500_constituents", "metadata.json"),
         {
             "source_url": config.universe.source_url,
             "requested_as_of_date": requested_as_of_date.isoformat(),
             "data_as_of_date": data_as_of_date_str,
         },
     )
-    constituents = write_bronze_constituents(constituents, paths)
+    constituents = _write_bronze_constituents(constituents, store)
 
-    prices_raw_dir = paths.raw_dir("prices")
     raw_price_files = []
     for filename, payload in price_download.raw_payloads.items():
-        raw_price_files.append(str(write_text(prices_raw_dir / filename, payload)))
-    write_json(
-        prices_raw_dir / "metadata.json",
+        raw_price_files.append(store.write_text(store.raw_uri("prices", filename), payload))
+    store.write_json(
+        store.raw_uri("prices", "metadata.json"),
         {
             "provider": config.prices.provider,
             "start": start.isoformat(),
@@ -138,25 +170,25 @@ def run_one_shot(
             "raw_payload_files": raw_price_files,
         },
     )
-    daily_prices = write_bronze_prices(daily_prices, paths)
+    daily_prices = _write_bronze_prices(daily_prices, store)
     asset_tickers = set(constituents["ticker"].astype(str))
     asset_daily_prices = daily_prices.loc[
         daily_prices["ticker"].astype(str).isin(asset_tickers)
     ].copy()
 
     spy_daily = build_spy_daily(daily_prices)
-    write_silver_table(spy_daily, "spy_daily", paths)
+    _write_silver_table(spy_daily, "spy_daily", store)
     benchmark_returns = build_benchmark_returns(
         spy_daily,
         horizons=config.forecast.label_horizons,
     )
-    write_silver_table(benchmark_returns, "benchmark_returns", paths)
+    _write_silver_table(benchmark_returns, "benchmark_returns", store)
 
     returns = build_asset_daily_returns(asset_daily_prices)
-    write_silver_table(returns, "asset_daily_returns", paths)
+    _write_silver_table(returns, "asset_daily_returns", store)
 
     universe_snapshot = build_asset_universe_snapshot(constituents, asset_daily_prices)
-    write_silver_table(universe_snapshot, "asset_universe_snapshot", paths)
+    _write_silver_table(universe_snapshot, "asset_universe_snapshot", store)
 
     feature_panel = compute_asset_feature_panel(
         asset_daily_prices,
@@ -164,17 +196,18 @@ def run_one_shot(
         config.panel_features,
         benchmark_returns=spy_daily,
     )
-    write_silver_table(feature_panel, "asset_daily_features_panel", paths)
+    _write_silver_table(feature_panel, "asset_daily_features_panel", store)
     labels_panel = build_forward_return_labels(
         asset_daily_prices,
         feature_panel,
         benchmark_returns=benchmark_returns,
         horizons=config.forecast.label_horizons,
     )
-    _write_gold_with_csv(paths, "labels_panel", labels_panel)
+    artifact_uris: list[str] = []
+    artifact_uris.extend(_write_gold_with_csv(store, "labels_panel", labels_panel))
 
     features = compute_asset_daily_features(asset_daily_prices, constituents, config.features)
-    write_silver_table(features, "asset_daily_features", paths)
+    _write_silver_table(features, "asset_daily_features", store)
 
     calibration_predictions = empty_calibration_predictions()
     calibration_diagnostics = _calibration_diagnostics_disabled(config)
@@ -191,11 +224,16 @@ def run_one_shot(
         calibration_diagnostics = ml_result.calibration_diagnostics
     else:
         optimizer_input, covariance = build_optimizer_inputs(features, returns, config.forecast)
-    write_parquet(optimizer_input, paths.gold_path("optimizer_input"))
-    write_csv(optimizer_input, paths.csv_mirror_path("gold", "optimizer_input"))
-    covariance.to_parquet(paths.gold_path("covariance_matrix"))
-    _write_gold_with_csv(paths, "forecast_calibration_diagnostics", calibration_diagnostics)
-    _write_gold_with_csv(paths, "forecast_calibration_predictions", calibration_predictions)
+    artifact_uris.extend(_write_gold_with_csv(store, "optimizer_input", optimizer_input))
+    artifact_uris.append(
+        store.write_parquet(store.table_uri("gold", "covariance_matrix"), covariance, index=True)
+    )
+    artifact_uris.extend(
+        _write_gold_with_csv(store, "forecast_calibration_diagnostics", calibration_diagnostics)
+    )
+    artifact_uris.extend(
+        _write_gold_with_csv(store, "forecast_calibration_predictions", calibration_predictions)
+    )
 
     portfolio_state, contribution_amount, live_state, live_repository = _load_rebalance_state(
         config,
@@ -260,10 +298,20 @@ def run_one_shot(
         live_state=live_state,
     )
 
-    _write_gold_with_csv(paths, "portfolio_recommendations", recommendations)
-    _write_gold_with_csv(paths, "portfolio_risk_metrics", risk_metrics)
-    _write_gold_with_csv(paths, "sector_exposure", sector_exposure)
-    _write_gold_with_csv(paths, "run_metadata", run_metadata)
+    gold_tables: dict[str, pd.DataFrame] = {
+        "labels_panel": labels_panel,
+        "optimizer_input": optimizer_input,
+        "forecast_calibration_diagnostics": calibration_diagnostics,
+        "forecast_calibration_predictions": calibration_predictions,
+        "portfolio_recommendations": recommendations,
+        "portfolio_risk_metrics": risk_metrics,
+        "sector_exposure": sector_exposure,
+        "run_metadata": run_metadata,
+    }
+    artifact_uris.extend(_write_gold_with_csv(store, "portfolio_recommendations", recommendations))
+    artifact_uris.extend(_write_gold_with_csv(store, "portfolio_risk_metrics", risk_metrics))
+    artifact_uris.extend(_write_gold_with_csv(store, "sector_exposure", sector_exposure))
+    artifact_uris.extend(_write_gold_with_csv(store, "run_metadata", run_metadata))
     account_tracking_tables: dict[str, pd.DataFrame] = {}
     if live_state is not None:
         account_tracking_tables = build_account_tracking_marts(
@@ -274,7 +322,8 @@ def run_one_shot(
             commission_rate=config.optimizer.commission_rate,
         )
         for name, table in account_tracking_tables.items():
-            _write_gold_with_csv(paths, name, table)
+            artifact_uris.extend(_write_gold_with_csv(store, name, table))
+            gold_tables[name] = table
         if live_repository is not None:
             _persist_account_tracking_outputs(
                 live_repository,
@@ -285,55 +334,61 @@ def run_one_shot(
                 performance_snapshots=account_tracking_tables["performance_snapshots"],
             )
 
-    artifact_paths = [
-        paths.gold_path("portfolio_recommendations"),
-        paths.csv_mirror_path("gold", "portfolio_recommendations"),
-        paths.gold_path("portfolio_risk_metrics"),
-        paths.csv_mirror_path("gold", "portfolio_risk_metrics"),
-        paths.gold_path("sector_exposure"),
-        paths.csv_mirror_path("gold", "sector_exposure"),
-        paths.gold_path("run_metadata"),
-        paths.csv_mirror_path("gold", "run_metadata"),
-        paths.gold_path("optimizer_input"),
-        paths.gold_path("covariance_matrix"),
-        paths.gold_path("forecast_calibration_diagnostics"),
-        paths.csv_mirror_path("gold", "forecast_calibration_diagnostics"),
-        paths.gold_path("forecast_calibration_predictions"),
-        paths.csv_mirror_path("gold", "forecast_calibration_predictions"),
-    ]
-    for name in account_tracking_tables:
-        artifact_paths.extend(
-            [
-                paths.gold_path(name),
-                paths.csv_mirror_path("gold", name),
-            ]
+    dashboard_mart = build_dashboard_mart(
+        recommendations,
+        risk_metrics,
+        sector_exposure,
+        run_metadata,
+        performance_snapshots=account_tracking_tables.get("performance_snapshots"),
+    )
+    tableau_tables: dict[str, pd.DataFrame] = {
+        "portfolio_dashboard_mart": dashboard_mart,
+        "forecast_calibration_diagnostics": calibration_diagnostics,
+        "forecast_calibration_predictions": calibration_predictions,
+        **account_tracking_tables,
+    }
+    if write_tableau_dashboard_mart:
+        artifact_uris.extend(
+            _write_gold_with_csv(store, "portfolio_dashboard_mart", dashboard_mart)
         )
+        gold_tables["portfolio_dashboard_mart"] = dashboard_mart
 
-    if config.tableau.export_hyper:
-        hyper_path = paths.gold_path("tableau_dashboard_mart", "hyper")
-        dashboard_mart = build_dashboard_mart(
-            recommendations,
-            risk_metrics,
-            sector_exposure,
-            run_metadata,
-            performance_snapshots=account_tracking_tables.get("performance_snapshots"),
+    if include_account_history and live_repository is not None and config.live_account.account_slug:
+        history_tables = build_account_history_marts(
+            repository=live_repository,
+            account_slug=config.live_account.account_slug,
+            daily_prices=daily_prices,
+            default_horizon_days=config.forecast.ml_horizon_days,
+            benchmark_ticker=config.prices.benchmark_tickers[0],
         )
-        hyper_tables = {
-            "portfolio_dashboard_mart": dashboard_mart,
-            "forecast_calibration_diagnostics": calibration_diagnostics,
-            "forecast_calibration_predictions": calibration_predictions,
-            **account_tracking_tables,
-        }
-        exported = export_hyper_if_available(
-            hyper_tables,
-            hyper_path,
-        )
-        if exported is None:
-            logger.warning("Tableau Hyper API is not installed; skipped Hyper export")
+        for name, table in history_tables.items():
+            artifact_uris.extend(_write_gold_with_csv(store, name, table))
+            gold_tables[name] = table
+            tableau_tables[name] = table
+
+    if should_export_hyper:
+        hyper_uri = store.table_uri("gold", "tableau_dashboard_mart", "hyper")
+        hyper_path = store.local_path(hyper_uri)
+        if hyper_path is None:
+            logger.warning("Tableau Hyper export requires a local artifact store; skipped")
         else:
-            artifact_paths.append(exported)
+            hyper_tables = {
+                "portfolio_dashboard_mart": dashboard_mart,
+                "forecast_calibration_diagnostics": calibration_diagnostics,
+                "forecast_calibration_predictions": calibration_predictions,
+                **account_tracking_tables,
+            }
+            exported = export_hyper_if_available(
+                hyper_tables,
+                hyper_path,
+            )
+            if exported is None:
+                logger.warning("Tableau Hyper API is not installed; skipped Hyper export")
+            else:
+                artifact_uris.append(str(exported))
 
-    if config.mlflow.enabled:
+    if should_log_mlflow:
+        artifact_paths = _local_artifact_paths(store, artifact_uris)
         mlflow_run_id = log_portfolio_run(
             config,
             run_id=run_id,
@@ -348,19 +403,66 @@ def run_one_shot(
         logger.info("Logged one-shot run %s to MLflow run %s", run_id, mlflow_run_id)
 
     logger.info("Completed one-shot run %s", run_id)
-    return PipelineResult(
-        run_id=run_id,
-        as_of_date=data_as_of_date,
-        output_root=str(paths.run_root),
-        recommendations_path=str(paths.gold_path("portfolio_recommendations")),
-        risk_metrics_path=str(paths.gold_path("portfolio_risk_metrics")),
-        sector_exposure_path=str(paths.gold_path("sector_exposure")),
+    return OneShotRunOutput(
+        result=PipelineResult(
+            run_id=run_id,
+            as_of_date=data_as_of_date,
+            output_root=store.run_root_uri,
+            recommendations_path=store.table_uri("gold", "portfolio_recommendations"),
+            risk_metrics_path=store.table_uri("gold", "portfolio_risk_metrics"),
+            sector_exposure_path=store.table_uri("gold", "sector_exposure"),
+        ),
+        gold_tables=gold_tables,
+        tableau_tables=tableau_tables,
+        artifact_uris=artifact_uris,
     )
 
 
-def _write_gold_with_csv(paths: ProjectPaths, name: str, df: pd.DataFrame) -> None:
-    write_parquet(df, paths.gold_path(name))
-    write_csv(df, paths.csv_mirror_path("gold", name))
+def _write_bronze_constituents(
+    constituents: pd.DataFrame,
+    store: RunArtifactStore,
+) -> pd.DataFrame:
+    clean = validate_columns(constituents.copy(), "sp500_constituents")
+    write_table_with_csv(store, "bronze", "sp500_constituents", clean)
+    return clean
+
+
+def _write_bronze_prices(
+    daily_prices: pd.DataFrame,
+    store: RunArtifactStore,
+) -> pd.DataFrame:
+    clean = validate_columns(daily_prices.copy(), "daily_prices")
+    clean = clean.sort_values(["ticker", "date"]).reset_index(drop=True)
+    write_table_with_csv(store, "bronze", "daily_prices", clean)
+    return clean
+
+
+def _write_silver_table(
+    frame: pd.DataFrame,
+    name: str,
+    store: RunArtifactStore,
+) -> pd.DataFrame:
+    write_table_with_csv(store, "silver", name, frame)
+    return frame
+
+
+def _write_gold_with_csv(
+    store: RunArtifactStore,
+    name: str,
+    df: pd.DataFrame,
+    *,
+    parquet_index: bool = False,
+) -> list[str]:
+    return write_table_with_csv(store, "gold", name, df, parquet_index=parquet_index)
+
+
+def _local_artifact_paths(store: RunArtifactStore, artifact_uris: list[str]) -> list[Path]:
+    paths: list[Path] = []
+    for uri in artifact_uris:
+        path = store.local_path(uri)
+        if path is not None and path.exists():
+            paths.append(path)
+    return paths
 
 
 def _load_portfolio_state(config: PortfolioConfig) -> PortfolioState:

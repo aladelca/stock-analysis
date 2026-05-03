@@ -19,6 +19,8 @@ from stock_analysis.config import (
     TableauConfig,
 )
 from stock_analysis.ingestion.prices import PriceDownload
+from stock_analysis.pipeline import gcp_one_shot
+from stock_analysis.pipeline.gcp_one_shot import run_gcp_one_shot
 from stock_analysis.pipeline.one_shot import run_one_shot
 from stock_analysis.storage.contracts import (
     AccountRecord,
@@ -378,6 +380,59 @@ def test_one_shot_pipeline_can_emit_calibrated_ml_forecasts(
     assert not predictions.empty
 
 
+def test_gcp_one_shot_pipeline_writes_direct_gcs_artifacts_and_publishes_tables(
+    sample_html,
+    sample_config,
+    static_price_provider,
+    monkeypatch,
+) -> None:
+    storage_client = FakeStorageClient()
+    published: dict[str, pd.DataFrame] = {}
+
+    def fake_publish(tables, config, *, run_id, bigquery_client=None):
+        del config, bigquery_client
+        published.update({name: table.copy() for name, table in tables.items()})
+        return {name: f"project.gold.{name}" for name in tables}
+
+    sample_config.gcp.enabled = True
+    sample_config.gcp.project_id = "project"
+    sample_config.gcp.bucket = "stock-analysis-medallion-test"
+    sample_config.gcp.gcs_prefix = "runs"
+    sample_config.gcp.publish_bigquery = True
+    monkeypatch.setattr(gcp_one_shot, "publish_gold_tables_to_bigquery", fake_publish)
+
+    result = run_gcp_one_shot(
+        sample_config,
+        universe_html=sample_html,
+        price_provider=static_price_provider,
+        storage_client=storage_client,
+    )
+
+    assert result.gcs_run_root == "gs://stock-analysis-medallion-test/runs/test-run"
+    assert result.pipeline.output_root == "gs://stock-analysis-medallion-test/runs/test-run"
+    assert (
+        result.pipeline.recommendations_path
+        == "gs://stock-analysis-medallion-test/runs/test-run/gold/portfolio_recommendations.parquet"
+    )
+    bucket = storage_client.buckets["stock-analysis-medallion-test"]
+    assert "runs/test-run/raw/prices/static_prices.csv" in bucket.blobs
+    assert "runs/test-run/bronze/sp500_constituents.parquet" in bucket.blobs
+    assert "runs/test-run/silver/asset_daily_features.parquet" in bucket.blobs
+    assert "runs/test-run/gold/portfolio_recommendations.parquet" in bucket.blobs
+    assert "runs/test-run/gold/portfolio_dashboard_mart.parquet" in bucket.blobs
+    assert "optimizer_input" in published
+    assert "portfolio_recommendations" in published
+    assert "portfolio_dashboard_mart" in published
+    assert "forecast_calibration_diagnostics" in published
+    assert result.bigquery_tables["portfolio_recommendations"] == (
+        "project.gold.portfolio_recommendations"
+    )
+    assert (
+        result.bigquery_tables["portfolio_dashboard_mart"]
+        == "project.gold.portfolio_dashboard_mart"
+    )
+
+
 class FakeAccountTrackingRepository:
     def __init__(self) -> None:
         self.account = AccountRecord(id="account-1", slug="main", display_name="Main")
@@ -535,6 +590,49 @@ class _LongStaticPriceProvider:
         del start, end, as_of_date
         result = self.prices.loc[self.prices["provider_ticker"].isin(set(tickers))].copy()
         return PriceDownload(prices=result, raw_payloads={"static_prices.csv": result.to_csv()})
+
+
+class FakeStorageClient:
+    def __init__(self) -> None:
+        self.buckets: dict[str, FakeBucket] = {}
+
+    def bucket(self, name: str) -> FakeBucket:
+        bucket = self.buckets.get(name)
+        if bucket is None:
+            bucket = FakeBucket()
+            self.buckets[name] = bucket
+        return bucket
+
+
+class FakeBucket:
+    def __init__(self) -> None:
+        self.blobs: dict[str, FakeBlob] = {}
+
+    def blob(self, name: str) -> FakeBlob:
+        blob = self.blobs.get(name)
+        if blob is None:
+            blob = FakeBlob()
+            self.blobs[name] = blob
+        return blob
+
+
+class FakeBlob:
+    def __init__(self) -> None:
+        self.content = b""
+
+    def upload_from_string(self, content: str, content_type: str | None = None) -> None:
+        del content_type
+        self.content = content.encode("utf-8")
+
+    def upload_from_file(self, file_obj, content_type: str | None = None) -> None:
+        del content_type
+        self.content = file_obj.read()
+
+    def download_as_bytes(self) -> bytes:
+        return self.content
+
+    def exists(self) -> bool:
+        return bool(self.content)
 
 
 def _ml_portfolio_config(

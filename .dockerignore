@@ -1,0 +1,17 @@
+.beads/
+.git/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+data/
+notebook/
+tableau_prep_outputs/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite
+*.db
+.env
+configs/portfolio.local.yaml

@@ -1,0 +1,135 @@
+run:
+  as_of_date: null
+  output_root: data
+  run_id: null
+
+universe:
+  provider: wikipedia_sp500
+  source_url: https://en.wikipedia.org/wiki/List_of_S%26P_500_companies
+
+prices:
+  provider: yfinance
+  lookback_years: 5
+  batch_size: 100
+  benchmark_tickers: [SPY]
+  include_benchmark_tickers_in_universe: true
+
+features:
+  min_history_days: 252
+  momentum_windows: [63, 126, 252]
+  volatility_window: 63
+  drawdown_window: 252
+  moving_average_windows: [50, 200]
+
+panel_features:
+  min_history_days: 252
+  momentum_windows: [21, 63, 126, 252]
+  volatility_windows: [21, 63, 126]
+  drawdown_windows: [63, 252]
+  moving_average_windows: [50, 200]
+  return_windows: [1, 5, 21]
+  volume_zscore_window: 21
+  compute_cross_sectional_ranks: true
+
+forecast:
+  engine: ml
+  momentum_window: 252
+  volatility_penalty: 0.25
+  covariance_lookback_days: 252
+  label_horizons: [5, 21, 63]
+  ml_model_version: lightgbm_return_zscore
+  ml_horizon_days: 5
+  ml_max_assets: null
+  ml_score_scale: 1.0
+  ml_lightgbm_nested_cv: false
+  ml_lightgbm_inner_folds: 2
+  ml_random_seed: 42
+  ml_calibration_enabled: true
+  ml_calibration_method: isotonic
+  ml_calibration_target: return
+  ml_calibration_min_observations: 200
+  ml_calibration_min_validation_observations: 200
+  ml_calibration_validation_fraction: 0.2
+  ml_calibration_min_rank_ic: 0.02
+  ml_calibration_max_mae: null
+  ml_calibration_max_rmse: null
+  ml_calibration_lookback_days: null
+  ml_calibration_splits: 5
+  ml_calibration_embargo_days: 15
+  ml_calibration_shrinkage: 0.25
+  ml_use_calibrated_expected_return: true
+  ml_min_active_expected_return_vs_benchmark: 0.001
+
+optimizer:
+  max_weight: 0.24
+  benchmark_candidate_max_weight: 1.0
+  risk_aversion: 4.0
+  min_trade_weight: 0.005
+  min_rebalance_trade_weight: 0.005
+  lambda_turnover: 0.005
+  commission_rate: 0.002
+  sector_max_weight: 0.35
+  max_trade_abs_weight: null
+  preserve_outside_holdings: true
+  solver: null
+
+portfolio_state:
+  current_holdings_path: null
+  portfolio_value: null
+
+contributions:
+  initial_portfolio_value: 1000.0
+  monthly_deposit_amount: 0.0
+  deposit_frequency_days: 30
+  deposit_start_date: null
+  rebalance_on_deposit_day: true
+
+execution:
+  cash_balance: 0.0
+  no_trade_band: 0.01
+
+live_account:
+  enabled: false
+  account_slug: null
+  cashflow_source: scenario
+
+supabase:
+  enabled: false
+  url_env: SUPABASE_URL
+  key_env: SUPABASE_SERVICE_ROLE_KEY
+  schema_name: public
+  accounts_table: accounts
+  cashflows_table: cashflows
+  portfolio_snapshots_table: portfolio_snapshots
+  holding_snapshots_table: holding_snapshots
+  recommendation_runs_table: recommendation_runs
+  recommendation_lines_table: recommendation_lines
+  performance_snapshots_table: performance_snapshots
+
+tableau:
+  export_csv: true
+  export_hyper: false
+  publish_enabled: false
+  prep_output_root: tableau_prep_outputs
+  server_url: https://us-east-1.online.tableau.com
+  site_name: aladelca
+  project_name: Default
+  datasource_name: portfolio_dashboard_mart
+  workbook_name: portfolio_recommendations
+  workbook_output_path: tableau/workbooks/portfolio_recommendations.twb
+
+mlflow:
+  enabled: false
+  tracking_uri: sqlite:///data/mlflow/mlflow.db
+  experiment_name: stock-analysis-portfolio
+
+gcp:
+  enabled: true
+  project_id: stock-analysis-prod
+  region: us-central1
+  bucket: stock-analysis-medallion-prod
+  gcs_prefix: runs
+  bigquery_location: US
+  bigquery_dataset_gold: stock_analysis_gold
+  bigquery_dataset_metadata: stock_analysis_metadata
+  publish_bigquery: true

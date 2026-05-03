@@ -37,6 +37,7 @@ Default output is `tableau/workbooks/portfolio_recommendations.twb`.
 See:
 
 - `runbooks/full-execution.md`
+- `runbooks/gcp-on-demand-cloud-run.md`
 - `runbooks/tableau-prep.md`
 - `runbooks/tableau-server-publish.md`
 - `tableau/prep/portfolio_dashboard_mart.flow-spec.md`

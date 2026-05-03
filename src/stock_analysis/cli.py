@@ -28,6 +28,7 @@ from stock_analysis.ml.mlflow_tracking import (
     log_autoresearch_result,
 )
 from stock_analysis.ml.phase2 import Phase2Config, run_phase2
+from stock_analysis.pipeline.gcp_one_shot import run_gcp_one_shot
 from stock_analysis.pipeline.one_shot import run_one_shot
 from stock_analysis.storage.contracts import (
     AccountRecord,
@@ -50,6 +51,7 @@ from stock_analysis.tableau.workbook import PortfolioWorkbookSpec, write_portfol
 
 app = typer.Typer(help="One-shot S&P 500 portfolio assistant.")
 CONFIG_OPTION = typer.Option(Path("configs/portfolio.yaml"), "--config", "-c")
+GCP_CONFIG_OPTION = typer.Option(Path("configs/portfolio.gcp.yaml"), "--config", "-c")
 RUN_ID_OPTION = typer.Option(None, "--run-id")
 DATASOURCE_ARGUMENT = typer.Argument(..., help="Path to a .hyper datasource to publish.")
 WORKBOOK_ARGUMENT = typer.Argument(..., help="Path to a .twb workbook to publish.")
@@ -180,6 +182,35 @@ def run_one_shot_command(
     result = run_one_shot(portfolio_config)
     print(f"[green]Completed run[/green] {result.run_id}")
     print(f"Recommendations: {result.recommendations_path}")
+
+
+@app.command("run-gcp-one-shot")
+def run_gcp_one_shot_command(
+    config: Path = GCP_CONFIG_OPTION,
+    forecast_engine: str | None = FORECAST_ENGINE_OPTION,
+) -> None:
+    configure_logging()
+    portfolio_config = load_config(config)
+    if forecast_engine is not None:
+        if forecast_engine not in {"heuristic", "ml"}:
+            print("[red]--forecast-engine must be either 'heuristic' or 'ml'.[/red]")
+            raise typer.Exit(2)
+        portfolio_config.forecast.engine = cast(Literal["heuristic", "ml"], forecast_engine)
+    try:
+        result = run_gcp_one_shot(portfolio_config)
+    except RuntimeError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+    except ValueError as exc:
+        print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+    print(f"[green]Completed GCP run[/green] {result.pipeline.run_id}")
+    print(f"GCS run root: {result.gcs_run_root}")
+    print(f"Recommendations: {result.pipeline.recommendations_path}")
+    if result.bigquery_tables:
+        print("BigQuery tables:")
+        for name, table_id in sorted(result.bigquery_tables.items()):
+            print(f"  {name}: {table_id}")
 
 
 @app.command("upsert-account")

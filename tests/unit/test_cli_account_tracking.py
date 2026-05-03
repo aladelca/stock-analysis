@@ -7,6 +7,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from stock_analysis import cli
+from stock_analysis.domain.models import PipelineResult
+from stock_analysis.pipeline.gcp_one_shot import GcpPipelineResult
 from stock_analysis.storage.contracts import (
     AccountRecord,
     CashflowRecord,
@@ -136,6 +138,47 @@ def test_import_portfolio_snapshot_reads_holdings_file(tmp_path: Path, monkeypat
             price=200.0,
         )
     ]
+
+
+def test_run_gcp_one_shot_command_prints_cloud_outputs(tmp_path: Path, monkeypatch) -> None:
+    def fake_run_gcp_one_shot(config):
+        assert config.gcp.enabled is True
+        return GcpPipelineResult(
+            pipeline=PipelineResult(
+                run_id="gcp-run-1",
+                as_of_date=date(2026, 4, 24),
+                output_root="gs://bucket/runs/gcp-run-1",
+                recommendations_path=(
+                    "gs://bucket/runs/gcp-run-1/gold/portfolio_recommendations.parquet"
+                ),
+                risk_metrics_path="gs://bucket/runs/gcp-run-1/gold/portfolio_risk_metrics.parquet",
+                sector_exposure_path="gs://bucket/runs/gcp-run-1/gold/sector_exposure.parquet",
+            ),
+            gcs_run_root="gs://bucket/runs/gcp-run-1",
+            bigquery_tables={"portfolio_dashboard_mart": "project.gold.portfolio_dashboard_mart"},
+        )
+
+    monkeypatch.setattr(cli, "run_gcp_one_shot", fake_run_gcp_one_shot)
+    config_path = tmp_path / "portfolio.gcp.yaml"
+    config_path.write_text(
+        """
+gcp:
+  enabled: true
+  project_id: project
+  bucket: bucket
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["run-gcp-one-shot", "--config", str(config_path), "--forecast-engine", "ml"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Completed GCP run" in result.output
+    assert "gs://bucket/runs/gcp-run-1" in result.output
+    assert "project.gold.portfolio_dashboard_mart" in result.output
 
 
 runner = CliRunner()
