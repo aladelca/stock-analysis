@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -15,6 +16,7 @@ RUN_SCOPED_TABLES: frozenset[str] = frozenset(
         "tableau_dashboard_mart",
         "portfolio_recommendations",
         "portfolio_risk_metrics",
+        "price_coverage",
         "sector_exposure",
         "run_metadata",
         "forecast_calibration_diagnostics",
@@ -63,13 +65,12 @@ def publish_gold_tables_to_bigquery(
         table_name = _safe_table_name(name)
         table_id = f"{config.project_id}.{config.bigquery_dataset_gold}.{table_name}"
         prepared = _prepare_frame(frame, run_id=run_id)
-        if table_name in FULL_REFRESH_TABLES:
-            write_disposition = _write_truncate()
-        else:
-            write_disposition = _write_append()
         if table_name in RUN_SCOPED_TABLES and "run_id" in prepared.columns:
-            _delete_run_rows(client, table_id, run_id)
-        _load_dataframe(client, table_id, prepared, write_disposition=write_disposition)
+            _publish_run_scoped_table(client, table_id, prepared, run_id)
+        elif table_name in FULL_REFRESH_TABLES:
+            _publish_full_refresh_table(client, table_id, prepared, run_id)
+        else:
+            _load_dataframe(client, table_id, prepared, write_disposition=_write_append())
         published[name] = table_id
     return published
 
@@ -92,18 +93,67 @@ def _safe_table_name(name: str) -> str:
     return table_name
 
 
-def _delete_run_rows(client: Any, table_id: str, run_id: str) -> None:
-    bigquery, not_found = _bigquery_modules()
-    query = f"delete from `{table_id}` where run_id = @run_id"
-    job_config = bigquery.QueryJobConfig(
+def _publish_run_scoped_table(
+    client: Any,
+    table_id: str,
+    frame: pd.DataFrame,
+    run_id: str,
+) -> None:
+    staging_table_id = _staging_table_id(table_id, run_id)
+    _load_dataframe(client, staging_table_id, frame, write_disposition=_write_truncate())
+    query = f"""
+create table if not exists `{table_id}` as
+select * from `{staging_table_id}` where false;
+
+begin transaction;
+delete from `{table_id}` where run_id = @run_id;
+insert into `{table_id}` select * from `{staging_table_id}`;
+commit transaction;
+""".strip()
+    job_config = _run_id_query_job_config(run_id)
+    try:
+        client.query(query, job_config=job_config).result()
+    finally:
+        _drop_table(client, staging_table_id)
+
+
+def _publish_full_refresh_table(
+    client: Any,
+    table_id: str,
+    frame: pd.DataFrame,
+    run_id: str,
+) -> None:
+    staging_table_id = _staging_table_id(table_id, run_id)
+    _load_dataframe(client, staging_table_id, frame, write_disposition=_write_truncate())
+    query = f"""
+create or replace table `{table_id}` as
+select * from `{staging_table_id}`;
+""".strip()
+    try:
+        client.query(query).result()
+    finally:
+        _drop_table(client, staging_table_id)
+
+
+def _staging_table_id(table_id: str, run_id: str) -> str:
+    project_id, dataset_id, table_name = table_id.split(".", 2)
+    suffix = hashlib.sha256(f"{table_id}:{run_id}".encode()).hexdigest()[:12]
+    safe_run = _safe_table_name(run_id).lower()[:32]
+    return f"{project_id}.{dataset_id}._staging_{table_name}_{safe_run}_{suffix}"
+
+
+def _run_id_query_job_config(run_id: str) -> Any:
+    bigquery, _ = _bigquery_modules()
+    return bigquery.QueryJobConfig(
         query_parameters=[
             bigquery.ScalarQueryParameter("run_id", "STRING", run_id),
         ]
     )
-    try:
-        client.query(query, job_config=job_config).result()
-    except not_found:
-        return
+
+
+def _drop_table(client: Any, table_id: str) -> None:
+    query = f"drop table if exists `{table_id}`"
+    client.query(query).result()
 
 
 def _load_dataframe(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
 from typing import Literal
@@ -25,6 +26,10 @@ class PriceConfig(BaseModel):
     batch_size: int = Field(default=100, ge=1, le=500)
     benchmark_tickers: list[str] = Field(default_factory=lambda: ["SPY"])
     include_benchmark_tickers_in_universe: bool = True
+    max_stale_calendar_days: int = Field(default=5, ge=0)
+    min_requested_ticker_coverage: float = Field(default=0.95, ge=0, le=1)
+    fail_on_missing_benchmark: bool = True
+    fail_on_low_coverage: bool = True
 
 
 class FeatureConfig(BaseModel):
@@ -190,6 +195,7 @@ class GcpConfig(BaseModel):
     bigquery_dataset_gold: str = "stock_analysis_gold"
     bigquery_dataset_metadata: str = "stock_analysis_metadata"
     publish_bigquery: bool = True
+    allow_model_trained_after_data: bool = False
 
     @field_validator("bucket")
     @classmethod
@@ -229,4 +235,68 @@ class PortfolioConfig(BaseModel):
 def load_config(path: Path) -> PortfolioConfig:
     with path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
+    return apply_env_overrides(PortfolioConfig.model_validate(raw))
+
+
+def apply_env_overrides(
+    config: PortfolioConfig,
+    environ: Mapping[str, str] | None = None,
+) -> PortfolioConfig:
+    """Apply Cloud Run friendly config overrides from environment variables."""
+
+    import os
+
+    env = os.environ if environ is None else environ
+    raw = config.model_dump()
+    _set_if_present(raw, ("gcp", "project_id"), env, "STOCK_ANALYSIS_GCP_PROJECT_ID")
+    _set_if_present(raw, ("gcp", "region"), env, "STOCK_ANALYSIS_GCP_REGION")
+    _set_if_present(raw, ("gcp", "bucket"), env, "STOCK_ANALYSIS_GCP_BUCKET")
+    _set_if_present(raw, ("gcp", "gcs_prefix"), env, "STOCK_ANALYSIS_GCP_GCS_PREFIX")
+    _set_if_present(
+        raw,
+        ("gcp", "bigquery_dataset_gold"),
+        env,
+        "STOCK_ANALYSIS_GCP_BIGQUERY_DATASET_GOLD",
+    )
+    _set_if_present(
+        raw,
+        ("gcp", "model_registry_prefix"),
+        env,
+        "STOCK_ANALYSIS_GCP_MODEL_REGISTRY_PREFIX",
+    )
+    _set_if_present(
+        raw,
+        ("gcp", "model_artifact_uri"),
+        env,
+        "STOCK_ANALYSIS_GCP_MODEL_ARTIFACT_URI",
+        none_if_blank=True,
+    )
+    _set_if_present(raw, ("run", "run_id"), env, "STOCK_ANALYSIS_RUN_ID", none_if_blank=True)
+    _set_if_present(
+        raw,
+        ("run", "as_of_date"),
+        env,
+        "STOCK_ANALYSIS_RUN_AS_OF_DATE",
+        none_if_blank=True,
+    )
     return PortfolioConfig.model_validate(raw)
+
+
+def _set_if_present(
+    payload: dict[str, object],
+    path: tuple[str, str],
+    environ: Mapping[str, str],
+    env_name: str,
+    *,
+    none_if_blank: bool = False,
+) -> None:
+    if env_name not in environ:
+        return
+    value: object = environ[env_name]
+    if none_if_blank and str(value).strip() == "":
+        value = None
+    section = payload[path[0]]
+    if not isinstance(section, dict):
+        msg = f"Config section {path[0]!r} is not a mapping."
+        raise ValueError(msg)
+    section[path[1]] = value

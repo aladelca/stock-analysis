@@ -55,7 +55,12 @@ def sample_config(tmp_path: Path) -> PortfolioConfig:
         run=RunConfig(
             as_of_date=date(2026, 4, 24), output_root=tmp_path / "data", run_id="test-run"
         ),
-        prices=PriceConfig(lookback_years=1, batch_size=10),
+        prices=PriceConfig(
+            lookback_years=1,
+            batch_size=10,
+            fail_on_missing_benchmark=False,
+            fail_on_low_coverage=False,
+        ),
         features=FeatureConfig(
             min_history_days=20,
             momentum_windows=[5, 10],

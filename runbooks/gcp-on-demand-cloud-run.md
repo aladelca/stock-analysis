@@ -11,19 +11,22 @@ stock-analysis run-gcp-one-shot --config configs/portfolio.gcp.yaml --forecast-e
 ```
 
 `train-gcp-model` trains/calibrates the ML forecast model and writes a versioned model bundle to
-Cloud Storage. By default it also promotes the same bundle to the production model path used by
-inference:
+Cloud Storage. By default it also promotes the same immutable run bundle by writing the production
+pointer used by inference:
 
 ```text
 gs://<bucket>/models/runs/<training_run_id>/model.cloudpickle
 gs://<bucket>/models/runs/<training_run_id>/metadata.json
 gs://<bucket>/models/runs/<training_run_id>/calibration_diagnostics.parquet
 gs://<bucket>/models/runs/<training_run_id>/calibration_predictions.parquet
-gs://<bucket>/models/production/model.cloudpickle
+gs://<bucket>/models/runs/<training_run_id>/manifest.json
+gs://<bucket>/models/production/current.json
 ```
 
 `run-gcp-one-shot` loads the configured model artifact from Cloud Storage and does not retrain. If
-no production model exists yet, the command fails and tells you to run `train-gcp-model` first.
+no complete production manifest exists yet, the command fails and tells you to run
+`train-gcp-model` first. Inference validates model version, target column, forecast horizon,
+score scale, feature columns, calibration contract, and trained-through date before scoring.
 
 It writes medallion artifacts directly to Cloud Storage:
 
@@ -34,9 +37,9 @@ gs://<bucket>/runs/<run_id>/silver/
 gs://<bucket>/runs/<run_id>/gold/
 ```
 
-It also publishes Tableau-ready tables to BigQuery when `gcp.publish_bigquery: true`.
-Run-scoped tables are appendable and deduplicated by `run_id`; account history tables are
-full refreshed for the account so repeated on-demand executions do not duplicate older history rows.
+It also publishes Tableau-ready current-run tables to BigQuery when `gcp.publish_bigquery: true`.
+Run-scoped tables are replaced atomically per `run_id` through a staging table and BigQuery
+transaction.
 
 ## Preconditions
 
@@ -130,26 +133,29 @@ For tighter production IAM, scope BigQuery permissions to the dataset instead of
 
 ## Configure The Cloud YAML
 
-Edit `configs/portfolio.gcp.yaml`:
+Use the tracked `configs/portfolio.gcp.yaml` in the container image. Do not deploy an untracked
+project-specific config file. Project-specific values should be supplied as Cloud Run environment
+variables:
 
 ```yaml
 gcp:
   enabled: true
-  project_id: <project_id>
+  project_id: stock-analysis-prod
   region: us-central1
-  bucket: <bucket>
+  bucket: stock-analysis-medallion-prod
   gcs_prefix: runs
   model_registry_prefix: models
   model_artifact_uri: null
   bigquery_location: US
   bigquery_dataset_gold: stock_analysis_gold
   publish_bigquery: true
+  allow_model_trained_after_data: false
 ```
 
 Leave `model_artifact_uri: null` for normal operation. The inference job will read:
 
 ```text
-gs://<bucket>/models/production/model.cloudpickle
+gs://<bucket>/models/production/current.json
 ```
 
 Set `model_artifact_uri` only when you want to pin inference to a specific versioned model, for
@@ -157,7 +163,21 @@ example:
 
 ```yaml
 gcp:
-  model_artifact_uri: gs://<bucket>/models/runs/20260503T150000Z/model.cloudpickle
+  model_artifact_uri: gs://<bucket>/models/runs/20260503T150000Z/manifest.json
+```
+
+Supported deployment overrides:
+
+```text
+STOCK_ANALYSIS_GCP_PROJECT_ID
+STOCK_ANALYSIS_GCP_REGION
+STOCK_ANALYSIS_GCP_BUCKET
+STOCK_ANALYSIS_GCP_GCS_PREFIX
+STOCK_ANALYSIS_GCP_BIGQUERY_DATASET_GOLD
+STOCK_ANALYSIS_GCP_MODEL_REGISTRY_PREFIX
+STOCK_ANALYSIS_GCP_MODEL_ARTIFACT_URI
+STOCK_ANALYSIS_RUN_ID
+STOCK_ANALYSIS_RUN_AS_OF_DATE
 ```
 
 The GCP path should use Cloud Storage and BigQuery only. Leave Supabase disabled:
@@ -209,6 +229,7 @@ gcloud run jobs create stock-analysis-train-model \
   --memory=8Gi \
   --cpu=4 \
   --task-timeout=3600 \
+  --set-env-vars="STOCK_ANALYSIS_GCP_PROJECT_ID=${PROJECT_ID},STOCK_ANALYSIS_GCP_BUCKET=${BUCKET},STOCK_ANALYSIS_GCP_BIGQUERY_DATASET_GOLD=${GOLD_DATASET},STOCK_ANALYSIS_GCP_REGION=${REGION}" \
   --args="train-gcp-model,--config,configs/portfolio.gcp.yaml,--forecast-engine,ml"
 ```
 
@@ -222,6 +243,7 @@ gcloud run jobs create stock-analysis-one-shot \
   --memory=8Gi \
   --cpu=4 \
   --task-timeout=3600 \
+  --set-env-vars="STOCK_ANALYSIS_GCP_PROJECT_ID=${PROJECT_ID},STOCK_ANALYSIS_GCP_BUCKET=${BUCKET},STOCK_ANALYSIS_GCP_BIGQUERY_DATASET_GOLD=${GOLD_DATASET},STOCK_ANALYSIS_GCP_REGION=${REGION}" \
   --args="run-gcp-one-shot,--config,configs/portfolio.gcp.yaml,--forecast-engine,ml"
 ```
 
@@ -259,6 +281,7 @@ List GCS outputs:
 
 ```bash
 gcloud storage ls "gs://${BUCKET}/runs/"
+gcloud storage cat "gs://${BUCKET}/models/production/current.json"
 gcloud storage ls "gs://${BUCKET}/models/production/"
 gcloud storage ls "gs://${BUCKET}/models/runs/"
 ```
@@ -280,15 +303,18 @@ Expected core tables include:
 ```text
 portfolio_dashboard_mart
 optimizer_input
+price_coverage
 portfolio_recommendations
 portfolio_risk_metrics
 sector_exposure
 run_metadata
 forecast_calibration_diagnostics
 forecast_calibration_predictions
-recommendation_lines_history
-performance_snapshots_history
 ```
+
+History tables such as `recommendation_lines_history` and `performance_snapshots_history` are not
+published by the cloud flow yet because live account tracking is still local/Supabase-backed. Add a
+BigQuery-backed account repository before using cloud as the account-performance system of record.
 
 ## Tableau
 
@@ -297,8 +323,8 @@ Connect Tableau to Google BigQuery and use:
 ```text
 <project_id>.stock_analysis_gold.portfolio_dashboard_mart
 <project_id>.stock_analysis_gold.portfolio_recommendations
-<project_id>.stock_analysis_gold.recommendation_lines_history
-<project_id>.stock_analysis_gold.performance_snapshots_history
+<project_id>.stock_analysis_gold.price_coverage
+<project_id>.stock_analysis_gold.run_metadata
 ```
 
 Use `run_id`, `as_of_date`, and `run_data_as_of_date` as dashboard filters.
@@ -309,5 +335,7 @@ Use `run_id`, `as_of_date`, and `run_data_as_of_date` as dashboard filters.
 - The GCP pipeline writes directly to Cloud Storage through `GcsArtifactStore`.
 - GCP model artifacts are stored directly in Cloud Storage through `GcsModelRegistry`.
 - Inference loads the promoted GCS model artifact and refuses to retrain implicitly.
+- `price_coverage` shows requested-vs-returned ticker coverage, last price date, stale status, and
+  whether the ticker had latest feature rows.
 - Cloud Scheduler is intentionally not configured in this phase.
 - Tableau Hyper export is skipped in the cloud command; BigQuery is the cloud serving layer.

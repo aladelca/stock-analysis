@@ -190,7 +190,7 @@ def test_train_gcp_model_command_prints_model_artifact(tmp_path: Path, monkeypat
             run_id="train-run-1",
             gcs_run_root="gs://bucket/runs/train-run-1",
             model_uri="gs://bucket/models/runs/train-run-1/model.cloudpickle",
-            production_model_uri="gs://bucket/models/production/model.cloudpickle",
+            production_model_uri="gs://bucket/models/production/current.json",
             artifact_uris=[],
         )
 
@@ -215,7 +215,7 @@ gcp:
 
     assert result.exit_code == 0, result.output
     assert "Completed GCP model training" in result.output
-    assert "gs://bucket/models/production/model.cloudpickle" in result.output
+    assert "gs://bucket/models/production/current.json" in result.output
 
 
 runner = CliRunner()

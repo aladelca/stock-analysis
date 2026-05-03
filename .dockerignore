@@ -15,3 +15,6 @@ __pycache__/
 *.db
 .env
 configs/portfolio.local.yaml
+configs/*.local.yaml
+configs/*.proyectodata.yaml
+configs/*.secret.yaml

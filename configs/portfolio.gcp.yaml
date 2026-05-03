@@ -13,6 +13,10 @@ prices:
   batch_size: 100
   benchmark_tickers: [SPY]
   include_benchmark_tickers_in_universe: true
+  max_stale_calendar_days: 5
+  min_requested_ticker_coverage: 0.95
+  fail_on_missing_benchmark: true
+  fail_on_low_coverage: true
 
 features:
   min_history_days: 252
@@ -135,3 +139,4 @@ gcp:
   bigquery_dataset_gold: stock_analysis_gold
   bigquery_dataset_metadata: stock_analysis_metadata
   publish_bigquery: true
+  allow_model_trained_after_data: false

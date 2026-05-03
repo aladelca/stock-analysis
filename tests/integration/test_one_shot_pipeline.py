@@ -54,6 +54,7 @@ def test_one_shot_pipeline_writes_outputs(
     assert (output_root / "silver" / "asset_daily_features_panel.parquet").exists()
     assert (output_root / "silver" / "spy_daily.parquet").exists()
     assert (output_root / "silver" / "benchmark_returns.parquet").exists()
+    assert (output_root / "gold" / "price_coverage.parquet").exists()
     assert (output_root / "gold" / "labels_panel.parquet").exists()
     assert (output_root / "gold" / "portfolio_recommendations.parquet").exists()
     assert (output_root / "gold" / "csv" / "portfolio_recommendations.csv").exists()
@@ -74,6 +75,30 @@ def test_one_shot_pipeline_writes_outputs(
     assert recommendations["current_weight"].sum() == pytest.approx(0.0)
     assert recommendations["as_of_date"].nunique() == 1
     assert recommendations["as_of_date"].iat[0] == "2026-02-25"
+    price_coverage = pd.read_parquet(output_root / "gold" / "price_coverage.parquet")
+    assert {
+        "provider_ticker",
+        "coverage_status",
+        "last_price_date",
+        "has_latest_feature_row",
+    } <= set(price_coverage.columns)
+    assert price_coverage.set_index("provider_ticker").loc["SPY", "coverage_status"] == "missing"
+
+
+def test_one_shot_pipeline_fails_when_benchmark_prices_are_missing(
+    sample_html,
+    sample_config,
+    static_price_provider,
+) -> None:
+    sample_config.prices.fail_on_missing_benchmark = True
+    sample_config.prices.fail_on_low_coverage = False
+
+    with pytest.raises(ValueError, match="Benchmark price coverage"):
+        run_one_shot(
+            sample_config,
+            universe_html=sample_html,
+            price_provider=static_price_provider,
+        )
 
 
 def test_one_shot_pipeline_adds_spy_as_optimizer_candidate(
@@ -464,7 +489,7 @@ def test_gcp_ml_training_promotes_model_and_inference_loads_it_from_gcs(
         "gs://stock-analysis-medallion-test/models/runs/train-run/model.cloudpickle"
     )
     assert train_result.production_model_uri == (
-        "gs://stock-analysis-medallion-test/models/production/model.cloudpickle"
+        "gs://stock-analysis-medallion-test/models/production/current.json"
     )
 
     infer_config = _ml_portfolio_config(tmp_path, "infer-run")
@@ -487,6 +512,7 @@ def test_gcp_ml_training_promotes_model_and_inference_loads_it_from_gcs(
     assert "portfolio_recommendations" in published
     metadata = published["run_metadata"]
     assert metadata["model_artifact_uri"].iat[0] == train_result.production_model_uri
+    assert metadata["model_contract_status"].iat[0] == "passed"
     assert metadata["model_trained_through_date"].iat[0] == "2026-04-03"
     assert metadata["forecast_horizon_days"].iat[0] == 5
 

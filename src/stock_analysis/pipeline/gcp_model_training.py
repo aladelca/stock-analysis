@@ -102,7 +102,7 @@ def run_gcp_model_training(
                 run_id=run_id,
                 config_hash=config_hash,
                 model_uri=registry_uris["model"],
-                production_model_uri=registry_uris.get("production_model"),
+                production_model_uri=registry_uris.get("production_current"),
             ),
         )
     )
@@ -111,7 +111,7 @@ def run_gcp_model_training(
         run_id=run_id,
         gcs_run_root=store.run_root_uri,
         model_uri=registry_uris["model"],
-        production_model_uri=registry_uris.get("production_model"),
+        production_model_uri=registry_uris.get("production_current"),
         artifact_uris=artifact_uris,
     )
 

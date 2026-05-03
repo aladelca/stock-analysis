@@ -85,6 +85,7 @@ class OneShotMedallionData:
     returns: pd.DataFrame
     feature_panel: pd.DataFrame
     labels_panel: pd.DataFrame
+    price_coverage: pd.DataFrame
     features: pd.DataFrame
     artifact_uris: list[str]
 
@@ -175,6 +176,12 @@ def prepare_one_shot_medallion_data(
             "requested_end": requested_as_of_date.isoformat(),
             "data_as_of_date": data_as_of_date_str,
             "requested_tickers": len(provider_tickers),
+            "returned_tickers": int(daily_prices["provider_ticker"].nunique()),
+            "requested_ticker_coverage_ratio": (
+                float(daily_prices["provider_ticker"].nunique() / len(provider_tickers))
+                if provider_tickers
+                else 0.0
+            ),
             "returned_rows": len(daily_prices),
             "raw_payload_files": raw_price_files,
         },
@@ -206,13 +213,23 @@ def prepare_one_shot_medallion_data(
         benchmark_returns=spy_daily,
     )
     _write_silver_table(feature_panel, "asset_daily_features_panel", store)
+    price_coverage = _build_price_coverage(
+        provider_tickers=provider_tickers,
+        constituents=constituents,
+        daily_prices=daily_prices,
+        feature_panel=feature_panel,
+        data_as_of_date=data_as_of_date,
+        config=config,
+    )
+    _enforce_price_coverage(price_coverage, config)
+    artifact_uris = _write_gold_with_csv(store, "price_coverage", price_coverage)
     labels_panel = build_forward_return_labels(
         asset_daily_prices,
         feature_panel,
         benchmark_returns=benchmark_returns,
         horizons=config.forecast.label_horizons,
     )
-    artifact_uris = _write_gold_with_csv(store, "labels_panel", labels_panel)
+    artifact_uris.extend(_write_gold_with_csv(store, "labels_panel", labels_panel))
 
     features = compute_asset_daily_features(asset_daily_prices, constituents, config.features)
     _write_silver_table(features, "asset_daily_features", store)
@@ -225,6 +242,7 @@ def prepare_one_shot_medallion_data(
         returns=returns,
         feature_panel=feature_panel,
         labels_panel=labels_panel,
+        price_coverage=price_coverage,
         features=features,
         artifact_uris=artifact_uris,
     )
@@ -243,12 +261,16 @@ def run_one_shot_with_store(
     include_account_history: bool = False,
     ml_model_artifact: MLForecastModelArtifact | None = None,
     ml_model_artifact_uri: str | None = None,
+    medallion_data: OneShotMedallionData | None = None,
+    model_contract_status: str = "not_checked",
+    model_contract_checked_at_utc: str = "",
+    model_contract_failure_reason: str = "",
 ) -> OneShotRunOutput:
     run_id = store.run_id
     should_export_hyper = config.tableau.export_hyper if export_hyper is None else export_hyper
     should_log_mlflow = config.mlflow.enabled if log_mlflow is None else log_mlflow
 
-    medallion = prepare_one_shot_medallion_data(
+    medallion = medallion_data or prepare_one_shot_medallion_data(
         config,
         store=store,
         universe_html=universe_html,
@@ -263,6 +285,7 @@ def run_one_shot_with_store(
     returns = medallion.returns
     feature_panel = medallion.feature_panel
     labels_panel = medallion.labels_panel
+    price_coverage = medallion.price_coverage
     features = medallion.features
     artifact_uris: list[str] = list(medallion.artifact_uris)
     forecast_horizon_days = (
@@ -371,10 +394,15 @@ def run_one_shot_with_store(
         ml_model_artifact=ml_model_artifact,
         ml_model_artifact_uri=ml_model_artifact_uri,
         forecast_horizon_days=forecast_horizon_days,
+        price_coverage=price_coverage,
+        model_contract_status=model_contract_status,
+        model_contract_checked_at_utc=model_contract_checked_at_utc,
+        model_contract_failure_reason=model_contract_failure_reason,
     )
 
     gold_tables: dict[str, pd.DataFrame] = {
         "labels_panel": labels_panel,
+        "price_coverage": price_coverage,
         "optimizer_input": optimizer_input,
         "forecast_calibration_diagnostics": calibration_diagnostics,
         "forecast_calibration_predictions": calibration_predictions,
@@ -901,11 +929,16 @@ def _build_run_metadata(
     ml_model_artifact: MLForecastModelArtifact | None = None,
     ml_model_artifact_uri: str | None = None,
     forecast_horizon_days: int | None = None,
+    price_coverage: pd.DataFrame | None = None,
+    model_contract_status: str = "not_checked",
+    model_contract_checked_at_utc: str = "",
+    model_contract_failure_reason: str = "",
 ) -> pd.DataFrame:
     config_json = config.model_dump_json(exclude={"run": {"as_of_date"}})
     config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
     calibration = _calibration_context(calibration_diagnostics)
     expected_return_is_calibrated = calibration.get("calibration_status") == "calibrated"
+    coverage_context = _price_coverage_context(price_coverage)
     payload = {
         "run_id": run_id,
         "requested_as_of_date": requested_as_of_date.isoformat(),
@@ -918,6 +951,9 @@ def _build_run_metadata(
         ),
         "model_family": ("ridge_lightgbm_blend" if config.forecast.engine == "ml" else "heuristic"),
         "model_artifact_uri": ml_model_artifact_uri or "",
+        "model_contract_status": model_contract_status,
+        "model_contract_checked_at_utc": model_contract_checked_at_utc,
+        "model_contract_failure_reason": model_contract_failure_reason,
         "model_trained_through_date": (
             ml_model_artifact.trained_through_date if ml_model_artifact is not None else ""
         ),
@@ -983,6 +1019,16 @@ def _build_run_metadata(
         ),
         "universe_count": int(len(constituents)),
         "price_row_count": int(len(daily_prices)),
+        "requested_ticker_count": coverage_context.get("requested_ticker_count", 0),
+        "returned_ticker_count": coverage_context.get("returned_ticker_count", 0),
+        "latest_price_ticker_count": coverage_context.get("latest_price_ticker_count", 0),
+        "latest_feature_ticker_count": coverage_context.get("latest_feature_ticker_count", 0),
+        "usable_ticker_count": coverage_context.get("usable_ticker_count", 0),
+        "missing_ticker_count": coverage_context.get("missing_ticker_count", 0),
+        "stale_ticker_count": coverage_context.get("stale_ticker_count", 0),
+        "no_latest_feature_ticker_count": coverage_context.get("no_latest_feature_ticker_count", 0),
+        "price_coverage_ratio": coverage_context.get("price_coverage_ratio", 0.0),
+        "benchmark_price_status": coverage_context.get("benchmark_price_status", ""),
         "created_at_utc": datetime.now(UTC).isoformat(),
         "config_json": json.dumps(config.model_dump(mode="json"), sort_keys=True),
     }
@@ -993,6 +1039,197 @@ def _calibration_context(calibration_diagnostics: pd.DataFrame | None) -> dict[s
     if calibration_diagnostics is None or calibration_diagnostics.empty:
         return {}
     return _string_keyed_row(calibration_diagnostics.iloc[0].to_dict())
+
+
+def _build_price_coverage(
+    *,
+    provider_tickers: list[str],
+    constituents: pd.DataFrame,
+    daily_prices: pd.DataFrame,
+    feature_panel: pd.DataFrame,
+    data_as_of_date: date,
+    config: PortfolioConfig,
+) -> pd.DataFrame:
+    requested = pd.DataFrame(
+        {"provider_ticker": list(dict.fromkeys(str(ticker) for ticker in provider_tickers))}
+    )
+    metadata_columns = [
+        column
+        for column in [
+            "ticker",
+            "provider_ticker",
+            "security",
+            "gics_sector",
+            "is_benchmark_candidate",
+        ]
+        if column in constituents.columns
+    ]
+    metadata = constituents[metadata_columns].copy() if metadata_columns else pd.DataFrame()
+    if not metadata.empty:
+        metadata["provider_ticker"] = metadata["provider_ticker"].astype(str)
+        metadata = metadata.drop_duplicates("provider_ticker", keep="last")
+    coverage = requested.merge(metadata, on="provider_ticker", how="left")
+    coverage["ticker"] = coverage["ticker"].fillna(coverage["provider_ticker"])
+    coverage["ticker"] = coverage["ticker"].astype(str)
+    coverage["provider_ticker"] = coverage["provider_ticker"].astype(str)
+    coverage["is_benchmark_candidate"] = (
+        coverage.get(
+            "is_benchmark_candidate",
+            pd.Series(False, index=coverage.index),
+        )
+        .fillna(False)
+        .astype(bool)
+    )
+    benchmark_tickers = {str(ticker) for ticker in config.prices.benchmark_tickers}
+    coverage["is_benchmark_ticker"] = coverage["provider_ticker"].isin(benchmark_tickers) | (
+        coverage["ticker"].isin(benchmark_tickers)
+    )
+
+    prices = daily_prices.copy()
+    prices["provider_ticker"] = prices["provider_ticker"].astype(str)
+    prices["_date"] = pd.to_datetime(prices["date"], errors="coerce")
+    grouped = (
+        prices.dropna(subset=["_date"])
+        .groupby("provider_ticker", as_index=False)
+        .agg(
+            returned_price_rows=("date", "size"),
+            first_price_date=("_date", "min"),
+            last_price_date=("_date", "max"),
+        )
+    )
+    coverage = coverage.merge(grouped, on="provider_ticker", how="left")
+    coverage["returned_price_rows"] = coverage["returned_price_rows"].fillna(0).astype(int)
+    coverage["has_price_rows"] = coverage["returned_price_rows"].gt(0)
+    coverage["last_price_date"] = pd.to_datetime(
+        coverage["last_price_date"], errors="coerce"
+    ).dt.date
+    coverage["first_price_date"] = pd.to_datetime(
+        coverage["first_price_date"], errors="coerce"
+    ).dt.date
+    coverage["data_as_of_date"] = data_as_of_date.isoformat()
+    coverage["max_stale_calendar_days"] = int(config.prices.max_stale_calendar_days)
+    coverage["stale_calendar_days"] = coverage["last_price_date"].map(
+        lambda value: (
+            (data_as_of_date - value).days if pd.notna(value) and isinstance(value, date) else pd.NA
+        )
+    )
+    coverage["has_latest_price_date"] = coverage["last_price_date"].eq(data_as_of_date)
+
+    latest_feature_tickers: set[str] = set()
+    if not feature_panel.empty:
+        panel = feature_panel.copy()
+        panel["date"] = pd.to_datetime(panel["date"], errors="coerce")
+        latest_feature_date = panel["date"].max()
+        latest_feature_tickers = set(
+            panel.loc[panel["date"].eq(latest_feature_date), "ticker"].astype(str)
+        )
+    coverage["has_latest_feature_row"] = coverage["ticker"].astype(str).isin(latest_feature_tickers)
+    stale_days = pd.to_numeric(coverage["stale_calendar_days"], errors="coerce")
+    is_stale = stale_days.gt(int(config.prices.max_stale_calendar_days)).fillna(False)
+    coverage["is_stale"] = is_stale
+    coverage["coverage_status"] = "ok"
+    coverage.loc[~coverage["has_price_rows"], "coverage_status"] = "missing"
+    coverage.loc[coverage["has_price_rows"] & coverage["is_stale"], "coverage_status"] = "stale"
+    coverage.loc[
+        coverage["has_price_rows"] & ~coverage["is_stale"] & ~coverage["has_latest_feature_row"],
+        "coverage_status",
+    ] = "no_latest_feature"
+    coverage["included_in_latest_inference"] = (
+        coverage["coverage_status"].eq("ok") & coverage["has_latest_feature_row"]
+    )
+
+    columns = [
+        "ticker",
+        "provider_ticker",
+        "security",
+        "gics_sector",
+        "is_benchmark_candidate",
+        "is_benchmark_ticker",
+        "coverage_status",
+        "returned_price_rows",
+        "first_price_date",
+        "last_price_date",
+        "data_as_of_date",
+        "stale_calendar_days",
+        "max_stale_calendar_days",
+        "has_price_rows",
+        "has_latest_price_date",
+        "has_latest_feature_row",
+        "included_in_latest_inference",
+    ]
+    for column in columns:
+        if column not in coverage.columns:
+            coverage[column] = pd.NA
+    return coverage[columns].sort_values("ticker").reset_index(drop=True)
+
+
+def _enforce_price_coverage(price_coverage: pd.DataFrame, config: PortfolioConfig) -> None:
+    if price_coverage.empty:
+        msg = "No requested tickers are available for price coverage validation."
+        raise ValueError(msg)
+    requested_count = len(price_coverage)
+    usable_count = int(price_coverage["coverage_status"].eq("ok").sum())
+    coverage_ratio = usable_count / requested_count if requested_count else 0.0
+    if config.prices.fail_on_low_coverage and coverage_ratio < float(
+        config.prices.min_requested_ticker_coverage
+    ):
+        missing = price_coverage.loc[
+            ~price_coverage["coverage_status"].eq("ok"),
+            "provider_ticker",
+        ].astype(str)
+        msg = (
+            "Usable price coverage ratio "
+            f"{coverage_ratio:.3f} is below configured minimum "
+            f"{config.prices.min_requested_ticker_coverage:.3f}. "
+            f"Problem tickers: {', '.join(missing.head(20))}"
+        )
+        raise ValueError(msg)
+    if config.prices.fail_on_missing_benchmark:
+        benchmark_rows = price_coverage.loc[
+            price_coverage["is_benchmark_ticker"].fillna(False).astype(bool)
+        ]
+        invalid = benchmark_rows.loc[~benchmark_rows["coverage_status"].eq("ok")]
+        if benchmark_rows.empty or not invalid.empty:
+            status = (
+                "missing"
+                if benchmark_rows.empty
+                else ",".join(invalid["coverage_status"].astype(str).unique())
+            )
+            msg = f"Benchmark price coverage is not usable for inference: {status}"
+            raise ValueError(msg)
+
+
+def _price_coverage_context(price_coverage: pd.DataFrame | None) -> dict[str, object]:
+    if price_coverage is None or price_coverage.empty:
+        return {}
+    requested_count = len(price_coverage)
+    returned_count = int(price_coverage["has_price_rows"].fillna(False).astype(bool).sum())
+    latest_price_count = int(
+        price_coverage["has_latest_price_date"].fillna(False).astype(bool).sum()
+    )
+    latest_feature_count = int(
+        price_coverage["has_latest_feature_row"].fillna(False).astype(bool).sum()
+    )
+    usable_count = int(price_coverage["coverage_status"].eq("ok").sum())
+    missing_count = int(price_coverage["coverage_status"].eq("missing").sum())
+    stale_count = int(price_coverage["coverage_status"].eq("stale").sum())
+    no_latest_feature_count = int(price_coverage["coverage_status"].eq("no_latest_feature").sum())
+    benchmark = price_coverage.loc[
+        price_coverage["is_benchmark_ticker"].fillna(False).astype(bool),
+        "coverage_status",
+    ].astype(str)
+    return {
+        "requested_ticker_count": requested_count,
+        "returned_ticker_count": returned_count,
+        "latest_price_ticker_count": latest_price_count,
+        "latest_feature_ticker_count": latest_feature_count,
+        "usable_ticker_count": usable_count,
+        "missing_ticker_count": missing_count,
+        "stale_ticker_count": stale_count,
+        "no_latest_feature_ticker_count": no_latest_feature_count,
+        "price_coverage_ratio": usable_count / requested_count if requested_count else 0.0,
+        "benchmark_price_status": ",".join(sorted(set(benchmark))) if not benchmark.empty else "",
+    }
 
 
 def _latest_price_date(daily_prices: pd.DataFrame) -> date:

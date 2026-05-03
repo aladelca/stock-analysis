@@ -256,6 +256,20 @@ def build_ml_optimizer_inputs_from_model_artifact(
     )
 
 
+def expected_ml_target_column(config: ForecastConfig) -> str:
+    """Return the label column the configured ML model is expected to predict."""
+
+    candidate = _candidate_from_model_version(config.ml_model_version)
+    return _target_column(config, candidate)
+
+
+def expected_ml_horizon_days(config: ForecastConfig) -> int:
+    """Return the forecast horizon implied by the configured ML model."""
+
+    candidate = _candidate_from_model_version(config.ml_model_version)
+    return _horizon_days(config, candidate)
+
+
 def _training_context(
     feature_panel: pd.DataFrame,
     labels_panel: pd.DataFrame,

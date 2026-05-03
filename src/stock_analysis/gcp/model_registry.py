@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from dataclasses import fields
 from io import BytesIO
 from typing import Any
@@ -13,6 +15,8 @@ from stock_analysis.gcp.gcs_store import _parse_gcs_uri
 
 MODEL_FILENAME = "model.cloudpickle"
 METADATA_FILENAME = "metadata.json"
+MANIFEST_FILENAME = "manifest.json"
+CURRENT_POINTER_FILENAME = "current.json"
 CALIBRATION_DIAGNOSTICS_FILENAME = "calibration_diagnostics.parquet"
 CALIBRATION_PREDICTIONS_FILENAME = "calibration_predictions.parquet"
 
@@ -41,7 +45,7 @@ class GcsModelRegistry:
         return self._root_uri("production")
 
     def default_model_uri(self) -> str:
-        return f"{self.production_root_uri()}/{MODEL_FILENAME}"
+        return f"{self.production_root_uri()}/{CURRENT_POINTER_FILENAME}"
 
     def write_artifact(
         self,
@@ -63,22 +67,16 @@ class GcsModelRegistry:
             },
         )
         if promote:
-            production_uris = self._write_bundle(
-                artifact,
-                root_uri=self.production_root_uri(),
-                metadata={
-                    **_artifact_metadata(artifact),
-                    "run_id": run_id,
-                    "config_hash": config_hash,
-                    "promoted_to_production": True,
-                    "source_model_uri": uris["model"],
-                },
+            current_uri = self._write_current_pointer(
+                manifest_uri=uris["manifest"],
+                run_id=run_id,
+                config_hash=config_hash,
             )
-            uris.update({f"production_{key}": value for key, value in production_uris.items()})
+            uris["production_current"] = current_uri
         return uris
 
     def load_artifact(self, model_uri: str) -> MLForecastModelArtifact:
-        uri = _model_uri(model_uri)
+        uri = self._resolve_model_uri(model_uri)
         payload = self._blob(uri).download_as_bytes()
         artifact = cloudpickle.loads(payload)
         if not isinstance(artifact, MLForecastModelArtifact):
@@ -87,6 +85,19 @@ class GcsModelRegistry:
         return artifact
 
     def exists(self, uri: str) -> bool:
+        if uri.endswith(f"/{CURRENT_POINTER_FILENAME}") or uri.endswith(f"/{MANIFEST_FILENAME}"):
+            try:
+                self._resolve_model_uri(uri)
+            except ValueError:
+                return False
+            return True
+        pointer_uri = f"{uri.rstrip('/')}/{CURRENT_POINTER_FILENAME}"
+        if self._blob(pointer_uri).exists():
+            try:
+                self._resolve_model_uri(pointer_uri)
+            except ValueError:
+                return False
+            return True
         return bool(self._blob(_model_uri(uri)).exists())
 
     def _write_bundle(
@@ -100,23 +111,115 @@ class GcsModelRegistry:
         metadata_uri = f"{root_uri}/{METADATA_FILENAME}"
         diagnostics_uri = f"{root_uri}/{CALIBRATION_DIAGNOSTICS_FILENAME}"
         predictions_uri = f"{root_uri}/{CALIBRATION_PREDICTIONS_FILENAME}"
+        manifest_uri = f"{root_uri}/{MANIFEST_FILENAME}"
 
-        self._blob(model_uri).upload_from_string(
+        _upload_string(
+            self._blob(model_uri),
             cloudpickle.dumps(artifact),
             content_type="application/octet-stream",
+            if_generation_match=0,
         )
-        self._blob(metadata_uri).upload_from_string(
+        _upload_string(
+            self._blob(metadata_uri),
             _json_dumps(metadata),
             content_type="application/json",
+            if_generation_match=0,
         )
-        _upload_parquet(self._blob(diagnostics_uri), artifact.calibration_diagnostics)
-        _upload_parquet(self._blob(predictions_uri), artifact.calibration_predictions)
-        return {
+        _upload_parquet(
+            self._blob(diagnostics_uri),
+            artifact.calibration_diagnostics,
+            if_generation_match=0,
+        )
+        _upload_parquet(
+            self._blob(predictions_uri),
+            artifact.calibration_predictions,
+            if_generation_match=0,
+        )
+        uris = {
             "model": model_uri,
             "metadata": metadata_uri,
             "calibration_diagnostics": diagnostics_uri,
             "calibration_predictions": predictions_uri,
         }
+        _upload_string(
+            self._blob(manifest_uri),
+            _json_dumps(
+                _manifest_payload(root_uri=root_uri, artifact_uris=uris, metadata=metadata)
+            ),
+            content_type="application/json",
+            if_generation_match=0,
+        )
+        return {**uris, "manifest": manifest_uri}
+
+    def _write_current_pointer(
+        self,
+        *,
+        manifest_uri: str,
+        run_id: str,
+        config_hash: str,
+    ) -> str:
+        current_uri = self.default_model_uri()
+        payload: dict[str, object] = {
+            "manifest_uri": manifest_uri,
+            "run_id": run_id,
+            "config_hash": config_hash,
+        }
+        _upload_string(
+            self._blob(current_uri),
+            _json_dumps(payload),
+            content_type="application/json",
+        )
+        return current_uri
+
+    def _resolve_model_uri(self, uri: str) -> str:
+        if uri.endswith(f"/{CURRENT_POINTER_FILENAME}"):
+            pointer = self._download_json(uri)
+            manifest_uri = _required_uri(pointer, "manifest_uri", uri)
+            return self._model_uri_from_manifest(manifest_uri)
+        if uri.endswith(f"/{MANIFEST_FILENAME}"):
+            return self._model_uri_from_manifest(uri)
+        pointer_uri = f"{uri.rstrip('/')}/{CURRENT_POINTER_FILENAME}"
+        if self._blob(pointer_uri).exists():
+            return self._resolve_model_uri(pointer_uri)
+        return _model_uri(uri)
+
+    def _model_uri_from_manifest(self, manifest_uri: str) -> str:
+        manifest = self._download_json(manifest_uri)
+        artifact_uris = manifest.get("artifact_uris")
+        if not isinstance(artifact_uris, dict):
+            msg = f"Model manifest does not include artifact_uris: {manifest_uri}"
+            raise ValueError(msg)
+        required_keys = {
+            "model",
+            "metadata",
+            "calibration_diagnostics",
+            "calibration_predictions",
+        }
+        missing_keys = sorted(required_keys - set(artifact_uris))
+        if missing_keys:
+            msg = f"Model manifest {manifest_uri} is missing artifact URIs: {missing_keys}"
+            raise ValueError(msg)
+        for key in sorted(required_keys):
+            artifact_uri = artifact_uris[key]
+            if not isinstance(artifact_uri, str) or not self._blob(artifact_uri).exists():
+                msg = (
+                    f"Model manifest {manifest_uri} references missing artifact "
+                    f"{key}: {artifact_uri}"
+                )
+                raise ValueError(msg)
+        return str(artifact_uris["model"])
+
+    def _download_json(self, uri: str) -> dict[str, Any]:
+        blob = self._blob(uri)
+        if not blob.exists():
+            msg = f"GCS model registry object does not exist: {uri}"
+            raise ValueError(msg)
+        payload = blob.download_as_bytes().decode("utf-8")
+        parsed = json.loads(payload)
+        if not isinstance(parsed, dict):
+            msg = f"GCS model registry JSON object is not a mapping: {uri}"
+            raise ValueError(msg)
+        return parsed
 
     def _root_uri(self, suffix: str) -> str:
         prefix = f"{self.prefix}/" if self.prefix else ""
@@ -148,16 +251,63 @@ def _artifact_metadata(artifact: MLForecastModelArtifact) -> dict[str, object]:
     }
 
 
-def _upload_parquet(blob: Any, frame: pd.DataFrame) -> None:
+def _manifest_payload(
+    *,
+    root_uri: str,
+    artifact_uris: dict[str, str],
+    metadata: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "manifest_version": 1,
+        "root_uri": root_uri,
+        "artifact_uris": artifact_uris,
+        "metadata": metadata,
+    }
+
+
+def _required_uri(payload: dict[str, Any], field_name: str, source_uri: str) -> str:
+    value = payload.get(field_name)
+    if not isinstance(value, str) or not value:
+        msg = f"Model registry pointer {source_uri} is missing {field_name}."
+        raise ValueError(msg)
+    return value
+
+
+def _upload_parquet(
+    blob: Any,
+    frame: pd.DataFrame,
+    *,
+    if_generation_match: int | None = None,
+) -> None:
     buffer = BytesIO()
     frame.to_parquet(buffer, index=False)
     buffer.seek(0)
-    blob.upload_from_file(buffer, content_type="application/octet-stream")
+    kwargs: dict[str, object] = {"content_type": "application/octet-stream"}
+    if if_generation_match is not None:
+        kwargs["if_generation_match"] = if_generation_match
+    try:
+        blob.upload_from_file(buffer, **kwargs)
+    except TypeError:
+        blob.upload_from_file(buffer, content_type="application/octet-stream")
 
 
-def _json_dumps(payload: dict[str, object]) -> str:
-    import json
+def _upload_string(
+    blob: Any,
+    content: str | bytes,
+    *,
+    content_type: str,
+    if_generation_match: int | None = None,
+) -> None:
+    kwargs: dict[str, object] = {"content_type": content_type}
+    if if_generation_match is not None:
+        kwargs["if_generation_match"] = if_generation_match
+    try:
+        blob.upload_from_string(content, **kwargs)
+    except TypeError:
+        blob.upload_from_string(content, content_type=content_type)
 
+
+def _json_dumps(payload: Mapping[str, object]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True, default=str)
 
 

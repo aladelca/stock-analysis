@@ -35,12 +35,34 @@ def test_publish_gold_tables_to_bigquery_deletes_existing_run_rows_and_loads(mon
         "portfolio_recommendations": "project-1.gold.portfolio_recommendations",
         "recommendation_lines_history": "project-1.gold.recommendation_lines_history",
     }
+    recommendations_staging = bq._staging_table_id(
+        "project-1.gold.portfolio_recommendations",
+        "run-1",
+    )
+    history_staging = bq._staging_table_id(
+        "project-1.gold.recommendation_lines_history",
+        "run-1",
+    )
     assert client.queries == [
-        "delete from `project-1.gold.portfolio_recommendations` where run_id = @run_id"
+        (
+            "create table if not exists `project-1.gold.portfolio_recommendations` as\n"
+            f"select * from `{recommendations_staging}` where false;\n\n"
+            "begin transaction;\n"
+            "delete from `project-1.gold.portfolio_recommendations` where run_id = @run_id;\n"
+            "insert into `project-1.gold.portfolio_recommendations` "
+            f"select * from `{recommendations_staging}`;\n"
+            "commit transaction;"
+        ),
+        f"drop table if exists `{recommendations_staging}`",
+        (
+            "create or replace table `project-1.gold.recommendation_lines_history` as\n"
+            f"select * from `{history_staging}`;"
+        ),
+        f"drop table if exists `{history_staging}`",
     ]
-    assert client.loaded[0][0] == "project-1.gold.portfolio_recommendations"
-    assert client.loaded[1][0] == "project-1.gold.recommendation_lines_history"
-    assert client.loaded[0][2].write_disposition == "WRITE_APPEND"
+    assert client.loaded[0][0] == recommendations_staging
+    assert client.loaded[1][0] == history_staging
+    assert client.loaded[0][2].write_disposition == "WRITE_TRUNCATE"
     assert client.loaded[1][2].write_disposition == "WRITE_TRUNCATE"
     assert "run_id" in client.loaded[1][1].columns
     assert client.loaded[1][1]["run_id"].iat[0] == "run-1"
