@@ -101,13 +101,13 @@ def _publish_run_scoped_table(
 ) -> None:
     staging_table_id = _staging_table_id(table_id, run_id)
     _load_dataframe(client, staging_table_id, frame, write_disposition=_write_truncate())
+    _ensure_target_table_schema(client, table_id, staging_table_id)
+    column_list = _quoted_column_list(frame.columns)
     query = f"""
-create table if not exists `{table_id}` as
-select * from `{staging_table_id}` where false;
-
 begin transaction;
 delete from `{table_id}` where run_id = @run_id;
-insert into `{table_id}` select * from `{staging_table_id}`;
+insert into `{table_id}` ({column_list})
+select {column_list} from `{staging_table_id}`;
 commit transaction;
 """.strip()
     job_config = _run_id_query_job_config(run_id)
@@ -140,6 +140,37 @@ def _staging_table_id(table_id: str, run_id: str) -> str:
     suffix = hashlib.sha256(f"{table_id}:{run_id}".encode()).hexdigest()[:12]
     safe_run = _safe_table_name(run_id).lower()[:32]
     return f"{project_id}.{dataset_id}._staging_{table_name}_{safe_run}_{suffix}"
+
+
+def _ensure_target_table_schema(client: Any, table_id: str, staging_table_id: str) -> None:
+    _, not_found = _bigquery_modules()
+    try:
+        target = client.get_table(table_id)
+    except not_found:
+        client.query(
+            f"create table `{table_id}` as select * from `{staging_table_id}` where false"
+        ).result()
+        return
+
+    staging = client.get_table(staging_table_id)
+    target_columns = {field.name for field in target.schema}
+    missing_fields = [field for field in staging.schema if field.name not in target_columns]
+    if not missing_fields:
+        return
+
+    target.schema = [*target.schema, *missing_fields]
+    client.update_table(target, ["schema"])
+
+
+def _quoted_column_list(columns: pd.Index) -> str:
+    return ", ".join(_quote_identifier(str(column)) for column in columns)
+
+
+def _quote_identifier(identifier: str) -> str:
+    if "`" in identifier:
+        msg = f"BigQuery identifier contains an unsupported backtick: {identifier!r}"
+        raise ValueError(msg)
+    return f"`{identifier}`"
 
 
 def _run_id_query_job_config(run_id: str) -> Any:

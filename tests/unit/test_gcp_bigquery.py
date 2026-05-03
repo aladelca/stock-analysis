@@ -11,6 +11,10 @@ from stock_analysis.gcp import bigquery as bq
 def test_publish_gold_tables_to_bigquery_deletes_existing_run_rows_and_loads(monkeypatch) -> None:
     client = FakeBigQueryClient()
     monkeypatch.setattr(bq, "_bigquery_modules", lambda: (FakeBigQueryModule, FakeNotFound))
+    client.tables["project-1.gold.portfolio_recommendations"] = FakeTable(
+        "project-1.gold.portfolio_recommendations",
+        [FakeField("ticker"), FakeField("run_id")],
+    )
 
     published = bq.publish_gold_tables_to_bigquery(
         {
@@ -45,12 +49,11 @@ def test_publish_gold_tables_to_bigquery_deletes_existing_run_rows_and_loads(mon
     )
     assert client.queries == [
         (
-            "create table if not exists `project-1.gold.portfolio_recommendations` as\n"
-            f"select * from `{recommendations_staging}` where false;\n\n"
             "begin transaction;\n"
             "delete from `project-1.gold.portfolio_recommendations` where run_id = @run_id;\n"
             "insert into `project-1.gold.portfolio_recommendations` "
-            f"select * from `{recommendations_staging}`;\n"
+            "(`ticker`, `run_id`, `target_weight`)\n"
+            f"select `ticker`, `run_id`, `target_weight` from `{recommendations_staging}`;\n"
             "commit transaction;"
         ),
         f"drop table if exists `{recommendations_staging}`",
@@ -66,6 +69,9 @@ def test_publish_gold_tables_to_bigquery_deletes_existing_run_rows_and_loads(mon
     assert client.loaded[1][2].write_disposition == "WRITE_TRUNCATE"
     assert "run_id" in client.loaded[1][1].columns
     assert client.loaded[1][1]["run_id"].iat[0] == "run-1"
+    target_schema = client.tables["project-1.gold.portfolio_recommendations"].schema
+    assert [field.name for field in target_schema] == ["ticker", "run_id", "target_weight"]
+    assert client.updated_tables == [("project-1.gold.portfolio_recommendations", ["schema"])]
 
 
 def test_publish_gold_tables_to_bigquery_requires_project_id() -> None:
@@ -100,6 +106,8 @@ class FakeBigQueryClient:
     def __init__(self) -> None:
         self.queries: list[str] = []
         self.loaded: list[tuple[str, pd.DataFrame, object]] = []
+        self.tables: dict[str, FakeTable] = {}
+        self.updated_tables: list[tuple[str, list[str]]] = []
 
     def query(self, query: str, job_config=None) -> FakeQueryJob:
         del job_config
@@ -108,7 +116,33 @@ class FakeBigQueryClient:
 
     def load_table_from_dataframe(self, frame: pd.DataFrame, table_id: str, job_config=None):
         self.loaded.append((table_id, frame.copy(), job_config))
+        self.tables[table_id] = FakeTable(
+            table_id,
+            [FakeField(str(column)) for column in frame.columns],
+        )
         return FakeLoadJob()
+
+    def get_table(self, table_id: str) -> FakeTable:
+        table = self.tables.get(table_id)
+        if table is None:
+            raise FakeNotFound(table_id)
+        return table
+
+    def update_table(self, table: FakeTable, fields: list[str]) -> FakeTable:
+        self.tables[table.table_id] = table
+        self.updated_tables.append((table.table_id, fields))
+        return table
+
+
+class FakeTable:
+    def __init__(self, table_id: str, schema: list[FakeField]) -> None:
+        self.table_id = table_id
+        self.schema = schema
+
+
+class FakeField:
+    def __init__(self, name: str) -> None:
+        self.name = name
 
 
 class FakeBigQueryModule:
