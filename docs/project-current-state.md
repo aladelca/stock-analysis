@@ -12,6 +12,9 @@ methodological weaknesses, see `docs/preprocessing-medallion-pipeline.md`.
 For the current GCP deployment topology, resources, and cloud responsibilities, see
 `docs/cloud-architecture.md`.
 
+For the BigQuery dataset inventory and table/field data dictionary, see
+`docs/bigquery-data-dictionary.md`.
+
 The project is a one-shot, end-of-day S&P 500 portfolio assistant. It is designed to ingest a current
 S&P 500 universe, download historical end-of-day prices, build medallion data products, train or run
 a forecast model, optimize a long-only portfolio, persist account recommendation history, and emit

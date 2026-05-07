@@ -5,6 +5,9 @@ resources involved, and the responsibility of each resource. The cloud path is a
 replace the local pipeline. It provides an on-demand training job and an on-demand inference job that
 write medallion artifacts directly to Cloud Storage and publish dashboard tables to BigQuery.
 
+For BigQuery table-level granularity, field definitions, row counts, and dashboard usage, see
+`docs/bigquery-data-dictionary.md`.
+
 Current deployed state was checked with `gcloud` and `bq` on May 7, 2026.
 
 ## Executive Summary
