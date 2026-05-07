@@ -9,6 +9,9 @@ the stock-analysis project.
 For a deeper layer-by-layer explanation of preprocessing decisions, transformations, and current
 methodological weaknesses, see `docs/preprocessing-medallion-pipeline.md`.
 
+For the current GCP deployment topology, resources, and cloud responsibilities, see
+`docs/cloud-architecture.md`.
+
 The project is a one-shot, end-of-day S&P 500 portfolio assistant. It is designed to ingest a current
 S&P 500 universe, download historical end-of-day prices, build medallion data products, train or run
 a forecast model, optimize a long-only portfolio, persist account recommendation history, and emit
