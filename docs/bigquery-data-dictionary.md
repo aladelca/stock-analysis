@@ -1,8 +1,14 @@
-# BigQuery Data Dictionary
+# `stock_analysis_gold` BigQuery Data Dictionary
 
-This document describes the BigQuery datasets visible in project `proyectodata-348005`, the tables
-inside each dataset, their granularity, how they should be used, why they exist, and what
-information is available in them.
+This document describes only the BigQuery dataset used by the stock-analysis cloud pipeline:
+
+```text
+proyectodata-348005.stock_analysis_gold
+```
+
+It covers every visible table in `stock_analysis_gold`, including table purpose, granularity,
+dashboard use, reason for inclusion, field definitions, and the type of information each table
+contains.
 
 Metadata was inspected on May 7, 2026 with `bq ls`, `bq show`, and aggregate `bq query` commands.
 This document is based on schemas, row counts, and aggregate counts. It does not rely on row-level
@@ -10,46 +16,36 @@ sample data.
 
 ## Executive Summary
 
-The project currently has five BigQuery datasets:
+`stock_analysis_gold` is the Tableau-facing BigQuery dataset produced by the GCP stock-analysis
+pipeline. It contains the current cloud outputs for recommendations, optimizer inputs, model
+calibration, data coverage, risk metrics, sector exposure, and run audit metadata.
 
-| Dataset | Location | Tables | Main purpose | Relationship to stock-analysis |
-| --- | --- | ---: | --- | --- |
-| `ejemplo_etl` | `US` | 4 | Example sales star schema | Unrelated to stock-analysis |
-| `precios` | `US` | 1 | Scraped product price listings | Unrelated to stock-analysis |
-| `secop` | `US` | 1 | GA4/Firebase-style event analytics | Unrelated to stock-analysis |
-| `spotify_data` | `US` | 0 | Empty or expired Spotify workspace | Unrelated to stock-analysis |
-| `stock_analysis_gold` | `US` | 9 | Stock-analysis Tableau output layer | Current stock-analysis cloud output |
-
-The dataset to use for the Tableau portfolio dashboard is:
-
-```text
-proyectodata-348005.stock_analysis_gold
-```
-
-The other datasets look like personal, learning, or unrelated analytics datasets. They should not be
-joined into the stock-analysis dashboard unless there is a deliberate new product requirement.
+| Dataset | Location | Tables | Main purpose |
+| --- | --- | ---: | --- |
+| `stock_analysis_gold` | `US` | 9 | Stock-analysis Tableau output layer |
 
 ## Important Findings
 
 | Finding | Impact |
 | --- | --- |
-| `stock_analysis_gold` is the only stock-analysis output dataset. | Tableau portfolio work should start there. |
-| `spotify_data` has no visible tables. | There is no current dictionary to build beyond dataset metadata. |
 | `stock_analysis_gold` has partial run coverage across tables. | Some tables have 4 run IDs, others 2 or 3, because schema/publishing changed over time. Use `run_id` filters carefully. |
 | Some semantically float or boolean columns are typed as `INTEGER` in BigQuery because current values are null or empty. | Tableau may treat forecast outcome/account fields incorrectly until schemas are stabilized. |
-| None of the visible stock-analysis tables are partitioned or clustered. | Fine at current scale, but not ideal as run history grows. |
+| None of the visible tables are partitioned or clustered. | Fine at current scale, but not ideal as run history grows. |
 
-## BigQuery Inventory
+## Dataset Inventory
 
-### Dataset Summary
+Dataset: `proyectodata-348005.stock_analysis_gold`
 
-| Dataset | Tables | Approx rows | Description |
-| --- | ---: | ---: | --- |
-| `ejemplo_etl` | 4 | 141,016 | Small sales/order example model with dimensions and a fact table |
-| `precios` | 1 | 471 | Scraped product listing and price table |
-| `secop` | 1 | 4,295,584 | Event analytics table with nested GA4-style fields |
-| `spotify_data` | 0 | 0 | Empty dataset; has default expiration settings |
-| `stock_analysis_gold` | 9 | 837,700+ | Portfolio recommendation, forecast, risk, data-quality, and Tableau marts |
+| Property | Value |
+| --- | --- |
+| Project | `proyectodata-348005` |
+| Dataset | `stock_analysis_gold` |
+| Location | `US` |
+| Visible tables | 9 |
+| Approx rows | 837,700+ |
+| Main consumer | Tableau |
+| Main grain patterns | run, run-ticker, run-sector, run-metric, run-ticker-date |
+| Main information | Recommendations, forecast signals, calibrated returns, optimizer inputs, risk metrics, sector exposure, data coverage, run metadata |
 
 ### Stock-Analysis Run Coverage
 
@@ -85,10 +81,9 @@ Latest complete run aggregate checks:
 | `portfolio_recommendations` | 14 BUY, 106 HOLD, 383 EXCLUDE for run `20260503T174853Z` |
 | `portfolio_risk_metrics` | Expected return 0.017884, expected volatility 0.033444, 120 holdings |
 
-## Dataset: `stock_analysis_gold`
+## Dataset Purpose
 
-Purpose: current cloud output layer for the stock-analysis pipeline. This is the dataset Tableau
-should use.
+Purpose: current cloud output layer for the stock-analysis pipeline.
 
 Location: `US`
 
@@ -470,187 +465,7 @@ Why included: lets Tableau or SQL inspect score-to-return calibration behavior b
 | `calibration_sample` | STRING | Sample label, for example fit/validation |
 | `run_id` | STRING | Pipeline run id |
 
-## Dataset: `ejemplo_etl`
-
-Purpose: small example ETL/star-schema dataset. It appears to model sales orders with customer,
-product, territory dimensions, and an order-line fact table.
-
-Location: `US`
-
-Relationship to stock-analysis: unrelated.
-
-Why included: likely a learning/demo ETL dataset in the same GCP project.
-
-Tables:
-
-| Table | Rows | Grain | Use |
-| --- | ---: | --- | --- |
-| `dim_customer` | 19,185 | One customer | Customer lookup/dimension |
-| `dim_product` | 504 | One product | Product lookup/dimension |
-| `dim_territorio` | 10 | One territory | Sales territory lookup |
-| `fact_table` | 121,317 | Sales order line or sales order-product row | Sales/order fact analysis |
-
-### `ejemplo_etl.dim_customer`
-
-| Column | Type | Description |
-| --- | --- | --- |
-| `customerid` | INTEGER | Customer identifier |
-| `accountnumber` | STRING | Customer account number |
-| `customertype` | STRING | Customer type/category |
-
-### `ejemplo_etl.dim_product`
-
-| Column | Type | Description |
-| --- | --- | --- |
-| `productid` | INTEGER | Product identifier |
-| `productname` | STRING | Product name |
-| `color` | STRING | Product color |
-| `productsubcategoryname` | STRING | Product subcategory |
-| `productcategoryname` | STRING | Product category |
-
-### `ejemplo_etl.dim_territorio`
-
-| Column | Type | Description |
-| --- | --- | --- |
-| `territoryid` | INTEGER | Territory identifier |
-| `territoryname` | STRING | Territory name |
-| `countryregioncode` | STRING | Country/region code |
-| `territorygroup` | STRING | Higher-level territory group |
-
-### `ejemplo_etl.fact_table`
-
-| Column | Type | Description |
-| --- | --- | --- |
-| `SalesOrderID` | INTEGER | Sales order identifier |
-| `OrderQty` | INTEGER | Quantity ordered |
-| `productid` | INTEGER | Product foreign key |
-| `linetotal` | FLOAT | Line total value |
-| `unitprice` | FLOAT | Unit price |
-| `orderdate` | DATETIME | Order date/time |
-| `customerid` | INTEGER | Customer foreign key |
-| `territoryid` | INTEGER | Territory foreign key |
-
-## Dataset: `precios`
-
-Purpose: scraped product listing/pricing dataset.
-
-Location: `US`
-
-Relationship to stock-analysis: unrelated.
-
-Why included: likely stores product price scraping results for a separate analysis.
-
-Tables:
-
-| Table | Rows | Grain | Use |
-| --- | ---: | --- | --- |
-| `scrapped_data` | 471 | One scraped product/listing row | Compare product prices, sellers, brands, and images |
-
-### `precios.scrapped_data`
-
-| Column | Type | Description |
-| --- | --- | --- |
-| `title` | STRING | Product/listing title |
-| `seller` | STRING | Seller name |
-| `offer_price` | FLOAT | Current offer price |
-| `regular_price` | FLOAT | Regular listed price |
-| `catalog_price` | FLOAT | Catalog/reference price |
-| `brand` | STRING | Product brand |
-| `images` | STRING | Image URL or serialized image references |
-
-## Dataset: `secop`
-
-Purpose: event analytics dataset. The schema appears to follow Google Analytics 4 or Firebase
-event-export conventions.
-
-Location: `US`
-
-Relationship to stock-analysis: unrelated.
-
-Why included: likely stores web/app analytics event data for another project.
-
-Tables:
-
-| Table | Rows | Grain | Use |
-| --- | ---: | --- | --- |
-| `analytics` | 4,295,584 | One analytics event | Event funnels, user/device/geography analysis, traffic source, ecommerce events |
-
-### `secop.analytics`
-
-Top-level fields:
-
-| Column | Type | Description |
-| --- | --- | --- |
-| `event_date` | STRING | Event date, usually YYYYMMDD in GA4 exports |
-| `event_timestamp` | INTEGER | Event timestamp in microseconds |
-| `event_name` | STRING | Event name |
-| `event_params` | REPEATED RECORD | Key/value event parameters |
-| `event_previous_timestamp` | INTEGER | Previous event timestamp |
-| `event_value_in_usd` | FLOAT | Event value converted to USD |
-| `event_bundle_sequence_id` | INTEGER | Event bundle sequence id |
-| `event_server_timestamp_offset` | INTEGER | Server timestamp offset |
-| `user_id` | STRING | Application user id, if set |
-| `user_pseudo_id` | STRING | Anonymous/pseudonymous analytics user id |
-| `privacy_info` | RECORD | Consent/storage flags |
-| `user_properties` | REPEATED RECORD | User property key/value records |
-| `user_first_touch_timestamp` | INTEGER | First-touch timestamp |
-| `user_ltv` | RECORD | User lifetime value fields |
-| `device` | RECORD | Device, OS, browser, language, and tracking fields |
-| `geo` | RECORD | Geographic fields such as country, region, city |
-| `app_info` | RECORD | App id, version, install source/store |
-| `traffic_source` | RECORD | Acquisition source, medium, campaign name |
-| `stream_id` | INTEGER | Analytics stream id |
-| `platform` | STRING | Platform, for example WEB, IOS, ANDROID |
-| `event_dimensions` | RECORD | Event-level dimension fields such as hostname |
-| `ecommerce` | RECORD | Transaction/revenue fields |
-| `items` | REPEATED RECORD | Item-level ecommerce payload |
-
-Nested records:
-
-| Nested field | Description |
-| --- | --- |
-| `event_params.key` and `event_params.value.*` | Event-specific dynamic parameters; values may be string, int, float, or double |
-| `privacy_info.*` | Consent and storage settings such as analytics storage and ads storage |
-| `user_properties.key` and `user_properties.value.*` | Dynamic user properties with timestamp |
-| `user_ltv.revenue`, `user_ltv.currency` | Lifetime value metrics |
-| `device.*` | Device category, brand, model, OS, language, browser, tracking flags |
-| `geo.*` | Continent, country, region, city, metro |
-| `app_info.*` | App/version/install metadata |
-| `traffic_source.*` | Acquisition source, medium, and name |
-| `ecommerce.*` | Transaction totals, revenue, refund, shipping, tax, transaction id |
-| `items.*` | Item id/name/brand/category, price, quantity, item revenue/refund, promotion fields |
-
-Privacy note:
-
-- `user_id`, `user_pseudo_id`, geo fields, and device fields can be sensitive. Use this dataset with
-  privacy controls and avoid exporting user-level rows unless there is a clear need.
-
-## Dataset: `spotify_data`
-
-Purpose: empty Spotify-related dataset or expired staging workspace.
-
-Location: `US`
-
-Relationship to stock-analysis: unrelated.
-
-Tables: none visible.
-
-Dataset settings:
-
-| Setting | Value |
-| --- | --- |
-| `defaultTableExpirationMs` | `5184000000` |
-| `defaultPartitionExpirationMs` | `5184000000` |
-| Expiration duration | 60 days |
-
-Interpretation:
-
-- The dataset likely had temporary tables that expired automatically.
-- There is currently no table-level data dictionary to create.
-
 ## Recommended Cleanup And Improvements
-
-### Stock-Analysis Dataset
 
 1. Stabilize BigQuery schemas with explicit load schemas. Do not rely on pandas/null inference for
    return, forecast outcome, account, and boolean fields.
@@ -664,20 +479,10 @@ Interpretation:
 6. Add BigQuery-backed account history tables before using GCP as the full dashboard source of
    truth for deposits, holdings, and performance history.
 
-### Other Datasets
-
-1. Add descriptions to `ejemplo_etl`, `precios`, `secop`, and `spotify_data` if they are still
-   active.
-2. Move unrelated datasets to separate projects if portfolio analytics needs cleaner IAM boundaries.
-3. Apply dataset-specific retention policies. `secop.analytics` is much larger than the other
-   non-stock tables and may need cost controls.
-4. Review privacy controls for `secop.analytics`, especially user and geo fields.
-
 ## Bottom Line
 
 Use `stock_analysis_gold` for the Tableau stock-analysis dashboard. It contains the current cloud
 outputs: recommendations, optimizer inputs, calibration diagnostics, risk metrics, sector exposure,
-run metadata, and data-quality coverage. The other datasets are unrelated and should be documented
-for project hygiene but kept out of the portfolio dashboard. The main technical improvement needed
-inside `stock_analysis_gold` is explicit BigQuery schema management so future realized forecast and
+run metadata, and data-quality coverage. The main technical improvement needed inside
+`stock_analysis_gold` is explicit BigQuery schema management so future realized forecast and
 account-history fields use stable FLOAT/BOOLEAN/DATE types.
