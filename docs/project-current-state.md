@@ -6,6 +6,9 @@ This document describes the current architecture, stack, data processing flow, m
 modeling approach, Tableau outputs, Supabase account tracking, and the main operational caveats of
 the stock-analysis project.
 
+For a deeper layer-by-layer explanation of preprocessing decisions, transformations, and current
+methodological weaknesses, see `docs/preprocessing-medallion-pipeline.md`.
+
 The project is a one-shot, end-of-day S&P 500 portfolio assistant. It is designed to ingest a current
 S&P 500 universe, download historical end-of-day prices, build medallion data products, train or run
 a forecast model, optimize a long-only portfolio, persist account recommendation history, and emit
